@@ -344,15 +344,15 @@ async function endSessionForKey(
 function loadConfig(api: OpenClawPluginApi): ClawGuardPluginConfig {
   const config = { ...DEFAULT_CONFIG };
 
-  // Try OpenClaw plugin config (plain object, not a Map)
-  const rt = api.runtime?.config;
-  if (rt) {
-    if (typeof rt.backendUrl === "string") config.backendUrl = rt.backendUrl;
-    if (typeof rt.apiKey === "string") config.apiKey = rt.apiKey;
-    if (typeof rt.agentId === "string") config.agentId = rt.agentId;
-    if (typeof rt.captureFullIo === "boolean") config.captureFullIo = rt.captureFullIo;
-    if (typeof rt.blockSensitiveAccess === "boolean") config.blockSensitiveAccess = rt.blockSensitiveAccess;
-    if (typeof rt.requireApprovalForHighRisk === "boolean") config.requireApprovalForHighRisk = rt.requireApprovalForHighRisk;
+  // Plugin-specific config from plugins.entries.<id>.config
+  const pc = api.pluginConfig;
+  if (pc) {
+    if (typeof pc.backendUrl === "string") config.backendUrl = pc.backendUrl;
+    if (typeof pc.apiKey === "string") config.apiKey = pc.apiKey;
+    if (typeof pc.agentId === "string") config.agentId = pc.agentId;
+    if (typeof pc.captureFullIo === "boolean") config.captureFullIo = pc.captureFullIo;
+    if (typeof pc.blockSensitiveAccess === "boolean") config.blockSensitiveAccess = pc.blockSensitiveAccess;
+    if (typeof pc.requireApprovalForHighRisk === "boolean") config.requireApprovalForHighRisk = pc.requireApprovalForHighRisk;
   }
 
   // Environment variable overrides

@@ -51,7 +51,14 @@ export interface SessionEndRequest {
 export interface OpenClawPluginApi {
   registerHook(event: string, handler: HookHandler): void;
   registerBackgroundService(name: string, service: BackgroundService): void;
-  runtime: PluginRuntime;
+  /** Plugin-specific config from plugins.entries.<id>.config */
+  pluginConfig: Record<string, unknown>;
+  /** Full OpenClaw config snapshot */
+  config?: Record<string, unknown>;
+  /** Runtime helpers */
+  runtime?: PluginRuntime;
+  /** Scoped logger */
+  logger?: { debug(...args: unknown[]): void; info(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void };
 }
 
 export interface HookHandler {
