@@ -3,7 +3,7 @@ import {
   detectSensitiveContent,
   isHighRiskTool,
   isSensitivePath,
-} from "./sensitive.js";
+} from "../src/sensitive.js";
 
 describe("detectSensitiveContent", () => {
   it("detects AWS access keys", () => {

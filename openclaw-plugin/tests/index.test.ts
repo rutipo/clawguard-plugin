@@ -22,19 +22,14 @@ describe("register()", () => {
     delete process.env.CLAWGUARD_API_KEY;
     delete process.env.CLAWGUARD_BACKEND_URL;
 
-    const { register } = await import("./index.js");
+    const mod = await import("../src/index.js");
 
     const api = {
       registerHook: vi.fn(),
-      registerBackgroundService: vi.fn(),
-      runtime: {
-        config: {
-          get: () => undefined,
-        },
-      },
+      pluginConfig: {},
     };
 
-    register(api as any);
+    mod.default.register(api as any);
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("No API key"),
@@ -48,48 +43,31 @@ describe("register()", () => {
 
 describe("plugin hooks (with API key)", () => {
   let hookHandlers: Record<string, Function>;
-  let bgServices: Record<string, any>;
 
   beforeEach(async () => {
     hookHandlers = {};
-    bgServices = {};
 
     process.env.CLAWGUARD_API_KEY = "test-key-123";
     process.env.CLAWGUARD_BACKEND_URL = "http://localhost:8000";
     process.env.CLAWGUARD_AGENT_ID = "test-bot";
 
     // Dynamic import to pick up env changes
-    // We need to reset the module to get fresh state
     vi.resetModules();
-    const mod = await import("./index.js");
+    const mod = await import("../src/index.js");
 
     const api = {
       registerHook: vi.fn((event: string, handler: Function) => {
         hookHandlers[event] = handler;
       }),
-      registerBackgroundService: vi.fn((name: string, svc: any) => {
-        bgServices[name] = svc;
-      }),
-      runtime: {
-        config: {
-          get: (key: string) => {
-            const vals: Record<string, unknown> = {
-              agentId: "test-bot",
-            };
-            return vals[key];
-          },
-        },
+      pluginConfig: {
+        agentId: "test-bot",
       },
     };
 
-    mod.register(api as any);
+    mod.default.register(api as any);
   });
 
   afterEach(async () => {
-    // Clean up
-    if (bgServices["clawguard-monitor"]) {
-      await bgServices["clawguard-monitor"].stop().catch(() => {});
-    }
     delete process.env.CLAWGUARD_API_KEY;
     delete process.env.CLAWGUARD_BACKEND_URL;
     delete process.env.CLAWGUARD_AGENT_ID;
@@ -98,12 +76,6 @@ describe("plugin hooks (with API key)", () => {
   it("registers before_tool_call and message_sending hooks", () => {
     expect(hookHandlers["before_tool_call"]).toBeDefined();
     expect(hookHandlers["message_sending"]).toBeDefined();
-  });
-
-  it("registers a background service", () => {
-    expect(bgServices["clawguard-monitor"]).toBeDefined();
-    expect(bgServices["clawguard-monitor"].start).toBeDefined();
-    expect(bgServices["clawguard-monitor"].stop).toBeDefined();
   });
 
   it("before_tool_call sends events to backend", async () => {
@@ -116,11 +88,8 @@ describe("plugin hooks (with API key)", () => {
       agentId: "test-bot",
     });
 
-    // Should have called: startSession + session_start event + tool_call event
-    // At minimum, startSession POST
     expect(mockFetch).toHaveBeenCalled();
 
-    // Check that a session start was sent
     const calls = mockFetch.mock.calls;
     const sessionStartCall = calls.find((c: any[]) =>
       c[0].includes("/v1/sessions/start"),
@@ -138,12 +107,10 @@ describe("plugin hooks (with API key)", () => {
       agentId: "test-bot",
     });
 
-    // Should send immediately due to risk flags
     const eventCalls = mockFetch.mock.calls.filter((c: any[]) =>
       c[0].includes("/v1/events") && !c[0].includes("batch") && !c[0].includes("sessions"),
     );
 
-    // At least the session_start event was sent immediately
     expect(eventCalls.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -165,9 +132,5 @@ describe("plugin hooks (with API key)", () => {
       channel: "telegram",
       sessionKey: "msg-test",
     });
-
-    // Should have queued an action event (or sent immediate)
-    // The event won't be sent immediately unless it has risk flags
-    // But it should be in the buffer
   });
 });
