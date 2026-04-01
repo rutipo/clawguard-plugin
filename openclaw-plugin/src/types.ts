@@ -87,11 +87,7 @@ export interface BackgroundService {
 }
 
 export interface PluginRuntime {
-  config: PluginConfig;
-}
-
-export interface PluginConfig {
-  get(key: string): unknown;
+  config: Record<string, unknown>;
 }
 
 // --- OpenClaw plugin entry point ---

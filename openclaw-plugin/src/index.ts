@@ -344,28 +344,15 @@ async function endSessionForKey(
 function loadConfig(api: OpenClawPluginApi): ClawGuardPluginConfig {
   const config = { ...DEFAULT_CONFIG };
 
-  // Try OpenClaw plugin config
+  // Try OpenClaw plugin config (plain object, not a Map)
   const rt = api.runtime?.config;
   if (rt) {
-    const backendUrl = rt.get("backendUrl");
-    if (typeof backendUrl === "string") config.backendUrl = backendUrl;
-
-    const apiKey = rt.get("apiKey");
-    if (typeof apiKey === "string") config.apiKey = apiKey;
-
-    const agentId = rt.get("agentId");
-    if (typeof agentId === "string") config.agentId = agentId;
-
-    const captureFullIo = rt.get("captureFullIo");
-    if (typeof captureFullIo === "boolean") config.captureFullIo = captureFullIo;
-
-    const blockSensitive = rt.get("blockSensitiveAccess");
-    if (typeof blockSensitive === "boolean")
-      config.blockSensitiveAccess = blockSensitive;
-
-    const requireApproval = rt.get("requireApprovalForHighRisk");
-    if (typeof requireApproval === "boolean")
-      config.requireApprovalForHighRisk = requireApproval;
+    if (typeof rt.backendUrl === "string") config.backendUrl = rt.backendUrl;
+    if (typeof rt.apiKey === "string") config.apiKey = rt.apiKey;
+    if (typeof rt.agentId === "string") config.agentId = rt.agentId;
+    if (typeof rt.captureFullIo === "boolean") config.captureFullIo = rt.captureFullIo;
+    if (typeof rt.blockSensitiveAccess === "boolean") config.blockSensitiveAccess = rt.blockSensitiveAccess;
+    if (typeof rt.requireApprovalForHighRisk === "boolean") config.requireApprovalForHighRisk = rt.requireApprovalForHighRisk;
   }
 
   // Environment variable overrides
