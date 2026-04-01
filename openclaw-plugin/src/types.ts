@@ -94,6 +94,23 @@ export interface PluginConfig {
   get(key: string): unknown;
 }
 
+// --- OpenClaw plugin entry point ---
+
+export interface PluginEntry {
+  id: string;
+  name: string;
+  description?: string;
+  register: (api: OpenClawPluginApi) => void;
+}
+
+/**
+ * Type-safe helper matching OpenClaw's definePluginEntry API.
+ * We define it locally so we don't need openclaw as a build dependency.
+ */
+export function definePluginEntry(entry: PluginEntry): PluginEntry {
+  return entry;
+}
+
 // --- Plugin configuration ---
 
 export interface ClawGuardPluginConfig {

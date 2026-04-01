@@ -30,7 +30,7 @@ import type {
   HookDecision,
   OpenClawPluginApi,
 } from "./types.js";
-import { DEFAULT_CONFIG } from "./types.js";
+import { DEFAULT_CONFIG, definePluginEntry } from "./types.js";
 
 /** Active session tracking. */
 interface ActiveSession {
@@ -383,60 +383,65 @@ function loadConfig(api: OpenClawPluginApi): ClawGuardPluginConfig {
 }
 
 /**
- * OpenClaw plugin registration entry point.
+ * OpenClaw plugin entry point using definePluginEntry format.
  */
-export function register(api: OpenClawPluginApi): void {
-  pluginConfig = loadConfig(api);
+export default definePluginEntry({
+  id: "clawguard-monitor",
+  name: "ClawGuard Monitor",
+  description: "Security monitoring for OpenClaw agents — detects risky behavior and sends Telegram alerts",
+  register(api) {
+    pluginConfig = loadConfig(api);
 
-  if (!pluginConfig.apiKey) {
-    console.warn(
-      "[clawguard] No API key configured. Set CLAWGUARD_API_KEY or configure in plugin settings.",
+    if (!pluginConfig.apiKey) {
+      console.warn(
+        "[clawguard] No API key configured. Set CLAWGUARD_API_KEY or configure in plugin settings.",
+      );
+      return;
+    }
+
+    console.log(
+      `[clawguard] Monitoring active - backend: ${pluginConfig.backendUrl}, agent: ${pluginConfig.agentId}`,
     );
-    return;
-  }
 
-  console.log(
-    `[clawguard] Monitoring active - backend: ${pluginConfig.backendUrl}, agent: ${pluginConfig.agentId}`,
-  );
+    // Initialize HTTP client
+    client = new ClawGuardClient(pluginConfig);
+    client.start();
 
-  // Initialize HTTP client
-  client = new ClawGuardClient(pluginConfig);
-  client.start();
-
-  // Hook into tool execution lifecycle
-  api.registerHook("before_tool_call", async (ctx: HookContext) => {
-    try {
-      return await handleBeforeToolCall(ctx);
-    } catch (err) {
-      // Never let monitoring errors break agent execution
-      console.error("[clawguard] before_tool_call error:", (err as Error).message);
-    }
-  });
-
-  // Hook into message sending
-  api.registerHook("message_sending", async (ctx: HookContext) => {
-    try {
-      return await handleMessageSending(ctx);
-    } catch (err) {
-      console.error("[clawguard] message_sending error:", (err as Error).message);
-    }
-  });
-
-  // Register cleanup as a background service
-  api.registerBackgroundService("clawguard-monitor", {
-    async start() {
-      // Client already started above
-    },
-    async stop() {
-      // End all active sessions
-      for (const key of sessions.keys()) {
-        await endSessionForKey(key, "completed").catch(() => {});
+    // Hook into tool execution lifecycle
+    api.registerHook("before_tool_call", async (ctx: HookContext) => {
+      try {
+        return await handleBeforeToolCall(ctx);
+      } catch (err) {
+        // Never let monitoring errors break agent execution
+        console.error("[clawguard] before_tool_call error:", (err as Error).message);
       }
-      await client.stop();
-      console.log("[clawguard] Monitoring stopped, events flushed.");
-    },
-  });
-}
+    });
+
+    // Hook into message sending
+    api.registerHook("message_sending", async (ctx: HookContext) => {
+      try {
+        return await handleMessageSending(ctx);
+      } catch (err) {
+        console.error("[clawguard] message_sending error:", (err as Error).message);
+      }
+    });
+
+    // Register cleanup as a background service
+    api.registerBackgroundService("clawguard-monitor", {
+      async start() {
+        // Client already started above
+      },
+      async stop() {
+        // End all active sessions
+        for (const key of sessions.keys()) {
+          await endSessionForKey(key, "completed").catch(() => {});
+        }
+        await client.stop();
+        console.log("[clawguard] Monitoring stopped, events flushed.");
+      },
+    });
+  },
+});
 
 // Export for direct usage / testing
 export { ClawGuardClient } from "./client.js";
