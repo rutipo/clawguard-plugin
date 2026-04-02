@@ -418,13 +418,9 @@ export default definePluginEntry({
       }
     });
 
-    // Clean up on process exit
-    process.on("beforeExit", async () => {
-      for (const key of sessions.keys()) {
-        await endSessionForKey(key, "completed").catch(() => {});
-      }
-      await client.stop();
-      console.log("[clawguard] Monitoring stopped, events flushed.");
+    // Flush remaining events on shutdown (best-effort, non-blocking)
+    process.on("SIGTERM", () => {
+      client.flush().catch(() => {});
     });
   },
 });
