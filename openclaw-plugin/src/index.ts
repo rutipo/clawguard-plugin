@@ -424,6 +424,9 @@ export default definePluginEntry({
       } catch (err) {
         console.error("[clawguard] before_tool_call error:", (err as Error).message);
       }
+    }, {
+      name: "clawguard.before-tool-call",
+      description: "ClawGuard security monitor — pre-tool-call guard",
     });
 
     // Hook into message sending
@@ -433,6 +436,9 @@ export default definePluginEntry({
       } catch (err) {
         console.error("[clawguard] message_sending error:", (err as Error).message);
       }
+    }, {
+      name: "clawguard.message-sending",
+      description: "ClawGuard security monitor — outbound message capture",
     });
 
     // Flush remaining events on shutdown (best-effort, non-blocking)
