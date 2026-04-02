@@ -51,6 +51,8 @@ export interface SessionEndRequest {
 export interface OpenClawPluginApi {
   registerHook(event: string, handler: HookHandler, opts?: { name?: string; description?: string }): void;
   on(event: string, handler: HookHandler): void;
+  /** Per-conversation lifecycle hook — fires when an agent conversation binding is resolved */
+  onConversationBindingResolved?(callback: (binding: ConversationBinding) => void): void;
   /** Plugin-specific config from plugins.entries.<id>.config */
   pluginConfig: Record<string, unknown>;
   /** Full OpenClaw config snapshot */
@@ -61,6 +63,13 @@ export interface OpenClawPluginApi {
   logger?: { debug(...args: unknown[]): void; info(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void };
   /** Registration mode: "full", "setup-only", "setup-runtime", or "cli-metadata" */
   registrationMode?: string;
+}
+
+/** Conversation binding — represents a resolved agent conversation context */
+export interface ConversationBinding {
+  on?(event: string, handler: HookHandler): void;
+  registerHook?(event: string, handler: HookHandler, opts?: { name?: string; description?: string }): void;
+  [key: string]: unknown;
 }
 
 export interface HookHandler {

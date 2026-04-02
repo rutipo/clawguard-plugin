@@ -25,6 +25,7 @@ import {
 } from "./sensitive.js";
 import type {
   ClawGuardPluginConfig,
+  ConversationBinding,
   EventPayload,
   HookContext,
   HookDecision,
@@ -417,32 +418,83 @@ export default definePluginEntry({
     _global[CONFIG_KEY] = pluginConfig;
     client.start();
 
-    // Hook into tool execution lifecycle
-    console.log("[clawguard] DEBUG api methods:", Object.keys(api).join(", "));
-    console.log("[clawguard] DEBUG api.on type:", typeof api.on);
-    console.log("[clawguard] DEBUG api.registerHook type:", typeof api.registerHook);
+    // --- Hook registration ---
+    // Strategy: register via registerHook (named, primary) + on (fallback).
+    // Also hook into onConversationBindingResolved for per-conversation hooks
+    // which may be required for embedded agent tool interception.
 
-    const hookMethod = api.on || api.registerHook;
-    console.log("[clawguard] DEBUG using hook method:", hookMethod === api.on ? "api.on" : "api.registerHook");
-
-    hookMethod.call(api, "before_tool_call", async (ctx: HookContext) => {
-      console.log("[clawguard] DEBUG hook fired: before_tool_call", ctx?.tool || "no-tool");
+    const beforeToolHandler = async (ctx: HookContext) => {
+      console.log("[clawguard] hook fired: before_tool_call", ctx?.tool || "no-tool");
       try {
         return await handleBeforeToolCall(ctx);
       } catch (err) {
         console.error("[clawguard] before_tool_call error:", (err as Error).message);
       }
-    });
+    };
 
-    // Hook into message sending
-    hookMethod.call(api, "message_sending", async (ctx: HookContext) => {
-      console.log("[clawguard] DEBUG hook fired: message_sending");
+    const messageSendingHandler = async (ctx: HookContext) => {
+      console.log("[clawguard] hook fired: message_sending");
       try {
         return await handleMessageSending(ctx);
       } catch (err) {
         console.error("[clawguard] message_sending error:", (err as Error).message);
       }
-    });
+    };
+
+    // 1. Register via api.registerHook (named hooks — required since OpenClaw v2026.3.28)
+    try {
+      api.registerHook("before_tool_call", beforeToolHandler, {
+        name: "clawguard.before-tool-call",
+        description: "ClawGuard security monitoring — captures tool calls and detects risky behavior",
+      });
+      api.registerHook("message_sending", messageSendingHandler, {
+        name: "clawguard.message-sending",
+        description: "ClawGuard security monitoring — captures outbound messages",
+      });
+      console.log("[clawguard] Hooks registered via registerHook");
+    } catch (err) {
+      console.error("[clawguard] registerHook failed:", (err as Error).message);
+      // Fall back to api.on
+      api.on("before_tool_call", beforeToolHandler);
+      api.on("message_sending", messageSendingHandler);
+      console.log("[clawguard] Hooks registered via api.on (fallback)");
+    }
+
+    // 2. Hook into per-conversation binding lifecycle (for embedded agents)
+    if (typeof api.onConversationBindingResolved === "function") {
+      console.log("[clawguard] Registering onConversationBindingResolved listener");
+      api.onConversationBindingResolved((binding: ConversationBinding) => {
+        console.log(
+          "[clawguard] Conversation binding resolved — type:",
+          typeof binding,
+          "keys:",
+          binding ? Object.keys(binding).join(", ") : "null",
+        );
+        // If the binding exposes its own hook registration, register there too
+        if (typeof binding.on === "function") {
+          console.log("[clawguard] Registering hooks on conversation binding via on()");
+          binding.on("before_tool_call", beforeToolHandler);
+          binding.on("message_sending", messageSendingHandler);
+        }
+        if (typeof binding.registerHook === "function") {
+          console.log("[clawguard] Registering hooks on conversation binding via registerHook()");
+          try {
+            binding.registerHook("before_tool_call", beforeToolHandler, {
+              name: "clawguard.before-tool-call",
+              description: "ClawGuard security monitoring — captures tool calls",
+            });
+            binding.registerHook("message_sending", messageSendingHandler, {
+              name: "clawguard.message-sending",
+              description: "ClawGuard security monitoring — captures messages",
+            });
+          } catch (e) {
+            console.error("[clawguard] binding.registerHook failed:", (e as Error).message);
+          }
+        }
+      });
+    } else {
+      console.log("[clawguard] onConversationBindingResolved not available");
+    }
 
     // Flush remaining events on shutdown (best-effort, non-blocking)
     process.on("SIGTERM", () => {

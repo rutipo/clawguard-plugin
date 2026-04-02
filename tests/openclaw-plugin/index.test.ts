@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
-// Reset modules to ensure clean state
+// Reset modules and global singleton state to ensure clean state
 beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockResolvedValue({
@@ -12,6 +12,11 @@ beforeEach(() => {
     json: () => Promise.resolve({ status: "ok", session_id: "test-session-123" }),
     text: () => Promise.resolve(""),
   });
+
+  // Reset globalThis singleton guards used by the plugin
+  (globalThis as Record<symbol, unknown>)[Symbol.for("clawguard-monitor-initialized")] = false;
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("clawguard-monitor-client")];
+  delete (globalThis as Record<symbol, unknown>)[Symbol.for("clawguard-monitor-config")];
 });
 
 describe("register()", () => {
@@ -26,6 +31,7 @@ describe("register()", () => {
 
     const api = {
       registerHook: vi.fn(),
+      on: vi.fn(),
       pluginConfig: {},
     };
 
@@ -57,6 +63,9 @@ describe("plugin hooks (with API key)", () => {
 
     const api = {
       registerHook: vi.fn((event: string, handler: Function) => {
+        hookHandlers[event] = handler;
+      }),
+      on: vi.fn((event: string, handler: Function) => {
         hookHandlers[event] = handler;
       }),
       pluginConfig: {
