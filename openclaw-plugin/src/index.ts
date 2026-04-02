@@ -417,9 +417,15 @@ export default definePluginEntry({
     _global[CONFIG_KEY] = pluginConfig;
     client.start();
 
-    // Hook into tool execution lifecycle — use api.on() which is wired
-    // into the embedded agent's tool execution pipeline (PR #6570)
-    api.on("before_tool_call", async (ctx: HookContext) => {
+    // Hook into tool execution lifecycle
+    console.log("[clawguard] DEBUG api methods:", Object.keys(api).join(", "));
+    console.log("[clawguard] DEBUG api.on type:", typeof api.on);
+    console.log("[clawguard] DEBUG api.registerHook type:", typeof api.registerHook);
+
+    const hookMethod = api.on || api.registerHook;
+    console.log("[clawguard] DEBUG using hook method:", hookMethod === api.on ? "api.on" : "api.registerHook");
+
+    hookMethod.call(api, "before_tool_call", async (ctx: HookContext) => {
       console.log("[clawguard] DEBUG hook fired: before_tool_call", ctx?.tool || "no-tool");
       try {
         return await handleBeforeToolCall(ctx);
@@ -429,7 +435,7 @@ export default definePluginEntry({
     });
 
     // Hook into message sending
-    api.on("message_sending", async (ctx: HookContext) => {
+    hookMethod.call(api, "message_sending", async (ctx: HookContext) => {
       console.log("[clawguard] DEBUG hook fired: message_sending");
       try {
         return await handleMessageSending(ctx);
