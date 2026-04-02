@@ -437,8 +437,6 @@ export default definePluginEntry({
         console.error("[clawguard] message_sending error:", (err as Error).message);
       }
     });
-      description: "ClawGuard security monitor — outbound message capture",
-    });
 
     // Flush remaining events on shutdown (best-effort, non-blocking)
     process.on("SIGTERM", () => {
