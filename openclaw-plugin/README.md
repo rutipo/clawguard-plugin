@@ -74,7 +74,7 @@ export CLAWGUARD_AGENT_ID=my-research-bot
 | Option | Env var | Default | Description |
 |--------|---------|---------|-------------|
 | `backendUrl` | `CLAWGUARD_BACKEND_URL` | `http://localhost:8000` | ClawGuard backend URL |
-| `apiKey` | `CLAWGUARD_API_KEY` | (required) | API key from `clawguard create-user` |
+| `apiKey` | `CLAWGUARD_API_KEY` | (required) | API key from `/v1/register` |
 | `agentId` | `CLAWGUARD_AGENT_ID` | `openclaw-agent` | Identifier for this agent |
 | `captureFullIo` | - | `false` | Capture full tool input/output (up to 50KB) |
 | `blockSensitiveAccess` | - | `false` | Block tool calls to sensitive files |
