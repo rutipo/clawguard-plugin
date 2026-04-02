@@ -29,8 +29,8 @@ openclaw plugins install clawguard-monitor
 Or install from source:
 
 ```bash
-git clone https://github.com/rutipo/clawguard-sdk.git
-cd clawguard-sdk/openclaw-plugin
+git clone https://github.com/rutipo/clawguard-plugin.git
+cd clawguard-plugin/openclaw-plugin
 npm install && npm run build
 openclaw plugins link .
 ```

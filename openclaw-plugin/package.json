@@ -32,10 +32,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/rutipo/clawguard-sdk.git",
+    "url": "https://github.com/rutipo/clawguard-plugin.git",
     "directory": "openclaw-plugin"
   },
-  "homepage": "https://github.com/rutipo/clawguard-sdk#readme",
+  "homepage": "https://github.com/rutipo/clawguard-plugin#readme",
   "author": "ClawGuard",
   "license": "MIT",
   "engines": {
