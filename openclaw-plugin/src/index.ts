@@ -419,6 +419,7 @@ export default definePluginEntry({
 
     // Hook into tool execution lifecycle
     api.registerHook("before_tool_call", async (ctx: HookContext) => {
+      console.log("[clawguard] DEBUG hook fired: before_tool_call", ctx?.tool || "no-tool");
       try {
         return await handleBeforeToolCall(ctx);
       } catch (err) {
@@ -431,6 +432,7 @@ export default definePluginEntry({
 
     // Hook into message sending
     api.registerHook("message_sending", async (ctx: HookContext) => {
+      console.log("[clawguard] DEBUG hook fired: message_sending");
       try {
         return await handleMessageSending(ctx);
       } catch (err) {
