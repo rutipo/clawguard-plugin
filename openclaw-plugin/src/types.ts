@@ -49,7 +49,7 @@ export interface SessionEndRequest {
 // --- OpenClaw plugin types (minimal subset we use) ---
 
 export interface OpenClawPluginApi {
-  registerHook(event: string, handler: HookHandler, opts?: { name?: string; description?: string }): void;
+  registerHook(event: string, handler: HookHandler | SyncHookHandler, opts?: { name?: string; description?: string }): void;
   on(event: string, handler: HookHandler): void;
   /** Per-conversation lifecycle hook — fires when an agent conversation binding is resolved */
   onConversationBindingResolved?(callback: (binding: ConversationBinding) => void): void;
@@ -74,6 +74,11 @@ export interface ConversationBinding {
 
 export interface HookHandler {
   (ctx: HookContext): Promise<HookDecision | void>;
+}
+
+/** Synchronous hook handler (for tool_result_persist and before_message_write) */
+export interface SyncHookHandler {
+  (ctx: HookContext): HookContext | undefined;
 }
 
 export interface HookContext {
