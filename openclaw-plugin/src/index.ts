@@ -409,7 +409,7 @@ export default definePluginEntry({
     _global[INIT_KEY] = true;
 
     console.log(
-      `[clawguard] Monitoring active - backend: ${pluginConfig.backendUrl}, agent: ${pluginConfig.agentId}`,
+      `[clawguard] Monitoring active (v3) - backend: ${pluginConfig.backendUrl}, agent: ${pluginConfig.agentId}`,
     );
 
     // Initialize HTTP client
@@ -436,6 +436,9 @@ export default definePluginEntry({
         const sessionKey = String(event.sessionKey || "main");
         const data = event.data as Record<string, unknown> | undefined;
         const stream = String(event.stream || "");
+
+        // Raw log every event so we can see what's coming through
+        console.log("[clawguard] AgentEvent raw:", `stream=${stream}`, data ? `dataKeys=${Object.keys(data).join(",")}` : "no-data");
 
         // Log stream type and data structure for tool-related events
         if (data) {
@@ -485,6 +488,10 @@ export default definePluginEntry({
       (events.onSessionTranscriptUpdate as Function)((update: Record<string, unknown>) => {
         const sessionKey = String(update.sessionKey || "main");
         const message = update.message as Record<string, unknown> | undefined;
+
+        // Raw log every update
+        console.log("[clawguard] Transcript raw:", message ? `role=${message.role} contentType=${typeof message.content} isArray=${Array.isArray(message.content)}` : "no-message");
+
         if (!message) return;
 
         const role = String(message.role || "");
@@ -493,6 +500,7 @@ export default definePluginEntry({
 
         for (const block of content) {
           const blockType = String(block.type || "");
+          console.log("[clawguard] Block:", `role=${role} type=${blockType} keys=${Object.keys(block).join(",")}`);
 
           // Tool call: assistant is calling a tool
           if (blockType === "toolCall") {
