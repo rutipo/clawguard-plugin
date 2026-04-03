@@ -427,66 +427,127 @@ export default definePluginEntry({
     const runtimeAny = api.runtime as unknown as Record<string, unknown> | undefined;
     const events = runtimeAny?.events as Record<string, unknown> | undefined;
 
+    // onAgentEvent: streaming events from the agent loop.
+    // Event shape: { runId, stream, data, sessionKey, seq, ts }
+    // The actual event payload is inside `data`.
     if (events && typeof events.onAgentEvent === "function") {
       console.log("[clawguard] Subscribing to runtime.events.onAgentEvent");
       (events.onAgentEvent as Function)((event: Record<string, unknown>) => {
-        const eventType = String(event.type || event.event_type || event.kind || "unknown");
-        const toolName = String(event.tool || event.toolName || event.tool_name || "");
-        console.log(
-          "[clawguard] AgentEvent:",
-          eventType,
-          toolName ? `tool=${toolName}` : "",
-          "keys=" + Object.keys(event).join(","),
-        );
+        const sessionKey = String(event.sessionKey || "main");
+        const data = event.data as Record<string, unknown> | undefined;
+        const stream = String(event.stream || "");
 
-        // Handle tool-related events
-        if (/tool/i.test(eventType) && toolName) {
-          const ctx: HookContext = {
-            tool: toolName,
-            args: (event.params || event.args || event.input) as Record<string, unknown> | undefined,
-            result: event.result || event.output,
-            sessionKey: String(event.sessionId || event.session_id || "main"),
-            agentId: String(event.agentId || event.agent_id || pluginConfig.agentId),
-          };
+        // Log stream type and data structure for tool-related events
+        if (data) {
+          const dataType = String(data.type || data.kind || data.event || "");
+          const toolName = String(data.tool || data.toolName || data.name || "");
 
-          // Determine if this is a before or after event
-          if (/start|before|begin|invoke/i.test(eventType)) {
-            handleBeforeToolCall(ctx).catch(err => {
-              console.error("[clawguard] before_tool_call error:", (err as Error).message);
-            });
-          } else if (/end|after|complete|result/i.test(eventType)) {
-            const session = sessions.get(ctx.sessionKey || "main");
-            if (session) {
-              handleToolResult(session, toolName, ctx.result);
+          if (toolName || /tool/i.test(dataType) || /tool/i.test(stream)) {
+            console.log(
+              "[clawguard] ToolEvent:",
+              `stream=${stream}`,
+              `dataType=${dataType}`,
+              `tool=${toolName}`,
+              "dataKeys=" + Object.keys(data).join(","),
+            );
+
+            // Process as a tool call
+            const ctx: HookContext = {
+              tool: toolName,
+              args: (data.params || data.args || data.input || data.arguments) as Record<string, unknown> | undefined,
+              result: data.result || data.output || data.content,
+              sessionKey,
+              agentId: pluginConfig.agentId,
+            };
+
+            if (/start|begin|invoke|call/i.test(dataType) || /start/i.test(stream)) {
+              handleBeforeToolCall(ctx).catch(err => {
+                console.error("[clawguard] tool event error:", (err as Error).message);
+              });
+            } else if (/end|complete|result|done/i.test(dataType) || /end|result/i.test(stream)) {
+              const session = sessions.get(sessionKey);
+              if (session) {
+                handleToolResult(session, toolName, ctx.result);
+              }
             }
           }
-        }
-
-        // Handle message events
-        if (/message.*send|response|reply/i.test(eventType)) {
-          const ctx: HookContext = {
-            message: String(event.content || event.message || event.text || ""),
-            channel: String(event.channel || "unknown"),
-            sessionKey: String(event.sessionId || event.session_id || "main"),
-            agentId: String(event.agentId || event.agent_id || pluginConfig.agentId),
-          };
-          handleMessageSending(ctx).catch(err => {
-            console.error("[clawguard] message_sending error:", (err as Error).message);
-          });
         }
       });
     } else {
       console.log("[clawguard] runtime.events.onAgentEvent not available");
     }
 
+    // onSessionTranscriptUpdate: fires when messages are written to the
+    // session transcript. Shape: { sessionFile, sessionKey, message, messageId }
+    // message.content[] contains toolCall entries and text responses.
     if (events && typeof events.onSessionTranscriptUpdate === "function") {
       console.log("[clawguard] Subscribing to runtime.events.onSessionTranscriptUpdate");
       (events.onSessionTranscriptUpdate as Function)((update: Record<string, unknown>) => {
-        console.log(
-          "[clawguard] TranscriptUpdate:",
-          "keys=" + Object.keys(update).join(","),
-          JSON.stringify(update).slice(0, 400),
-        );
+        const sessionKey = String(update.sessionKey || "main");
+        const message = update.message as Record<string, unknown> | undefined;
+        if (!message) return;
+
+        const role = String(message.role || "");
+        const content = message.content as Array<Record<string, unknown>> | undefined;
+        if (!content || !Array.isArray(content)) return;
+
+        for (const block of content) {
+          const blockType = String(block.type || "");
+
+          // Tool call: assistant is calling a tool
+          if (blockType === "toolCall") {
+            const toolName = String(block.name || block.tool || "unknown");
+            let args: Record<string, unknown> = {};
+            try {
+              args = typeof block.arguments === "string"
+                ? JSON.parse(block.arguments)
+                : (block.arguments as Record<string, unknown>) || {};
+            } catch {
+              args = { raw: String(block.arguments || "") };
+            }
+
+            console.log("[clawguard] Tool call:", toolName, "args:", truncate(JSON.stringify(args), 150));
+
+            const ctx: HookContext = {
+              tool: toolName,
+              args,
+              sessionKey,
+              agentId: pluginConfig.agentId,
+            };
+            handleBeforeToolCall(ctx).catch(err => {
+              console.error("[clawguard] tool call error:", (err as Error).message);
+            });
+          }
+
+          // Tool result: tool has completed
+          if (blockType === "toolResult") {
+            const toolName = String(block.name || block.tool || "unknown");
+            const result = block.content || block.output || block.result || "";
+
+            console.log("[clawguard] Tool result:", toolName, "size:", String(result).length);
+
+            const session = sessions.get(sessionKey);
+            if (session) {
+              handleToolResult(session, toolName, result);
+            }
+          }
+
+          // Agent text response (potential outbound message)
+          if (blockType === "text" && role === "assistant") {
+            const text = String(block.text || "");
+            if (text.length > 0) {
+              const ctx: HookContext = {
+                message: text,
+                channel: "agent",
+                sessionKey,
+                agentId: pluginConfig.agentId,
+              };
+              handleMessageSending(ctx).catch(err => {
+                console.error("[clawguard] message error:", (err as Error).message);
+              });
+            }
+          }
+        }
       });
     } else {
       console.log("[clawguard] runtime.events.onSessionTranscriptUpdate not available");
