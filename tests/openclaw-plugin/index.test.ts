@@ -40,19 +40,16 @@ describe("register()", () => {
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining("No API key"),
     );
-    // Should not register hooks when disabled
-    expect(api.registerHook).not.toHaveBeenCalled();
 
     warnSpy.mockRestore();
   });
 });
 
-describe("plugin hooks (with API key)", () => {
-  let hookHandlers: Record<string, Function>;
+describe("event-based monitoring (with API key)", () => {
+  let transcriptCallback: Function;
+  let agentEventCallback: Function;
 
   beforeEach(async () => {
-    hookHandlers = {};
-
     process.env.CLAWGUARD_API_KEY = "test-key-123";
     process.env.CLAWGUARD_BACKEND_URL = "http://localhost:8000";
     process.env.CLAWGUARD_AGENT_ID = "test-bot";
@@ -62,14 +59,20 @@ describe("plugin hooks (with API key)", () => {
     const mod = await import("../../openclaw-plugin/src/index.js");
 
     const api = {
-      registerHook: vi.fn((event: string, handler: Function) => {
-        hookHandlers[event] = handler;
-      }),
-      on: vi.fn((event: string, handler: Function) => {
-        hookHandlers[event] = handler;
-      }),
+      registerHook: vi.fn(),
+      on: vi.fn(),
       pluginConfig: {
         agentId: "test-bot",
+      },
+      runtime: {
+        events: {
+          onSessionTranscriptUpdate: vi.fn((cb: Function) => {
+            transcriptCallback = cb;
+          }),
+          onAgentEvent: vi.fn((cb: Function) => {
+            agentEventCallback = cb;
+          }),
+        },
       },
     };
 
@@ -82,20 +85,29 @@ describe("plugin hooks (with API key)", () => {
     delete process.env.CLAWGUARD_AGENT_ID;
   });
 
-  it("registers before_tool_call and message_sending hooks", () => {
-    expect(hookHandlers["before_tool_call"]).toBeDefined();
-    expect(hookHandlers["message_sending"]).toBeDefined();
+  it("subscribes to onSessionTranscriptUpdate and onAgentEvent", () => {
+    expect(transcriptCallback).toBeDefined();
+    expect(agentEventCallback).toBeDefined();
   });
 
-  it("before_tool_call sends events to backend", async () => {
-    const handler = hookHandlers["before_tool_call"];
-
-    await handler({
-      tool: "browser_search",
-      args: { query: "competitor pricing" },
+  it("tool call transcript update sends events to backend", async () => {
+    // Simulate a transcript update with a toolCall block
+    transcriptCallback({
       sessionKey: "test-session",
-      agentId: "test-bot",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "browser_search",
+            arguments: { query: "competitor pricing" },
+          },
+        ],
+      },
     });
+
+    // Wait for async handling
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(mockFetch).toHaveBeenCalled();
 
@@ -106,15 +118,22 @@ describe("plugin hooks (with API key)", () => {
     expect(sessionStartCall).toBeDefined();
   });
 
-  it("flags sensitive file access", async () => {
-    const handler = hookHandlers["before_tool_call"];
-
-    await handler({
-      tool: "read_file",
-      args: { path: "/app/.env" },
+  it("flags sensitive file access in tool call", async () => {
+    transcriptCallback({
       sessionKey: "sensitive-test",
-      agentId: "test-bot",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "read_file",
+            arguments: { path: "/app/.env" },
+          },
+        ],
+      },
     });
+
+    await new Promise((r) => setTimeout(r, 50));
 
     const eventCalls = mockFetch.mock.calls.filter((c: any[]) =>
       c[0].includes("/v1/events") && !c[0].includes("batch") && !c[0].includes("sessions"),
@@ -123,23 +142,61 @@ describe("plugin hooks (with API key)", () => {
     expect(eventCalls.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("message_sending captures outbound messages", async () => {
-    const handler = hookHandlers["message_sending"];
-
+  it("processes agent text responses without error", async () => {
     // First trigger a tool call to create a session
-    await hookHandlers["before_tool_call"]({
-      tool: "search",
-      args: {},
+    transcriptCallback({
       sessionKey: "msg-test",
-      agentId: "test-bot",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "search",
+            arguments: {},
+          },
+        ],
+      },
     });
 
-    mockFetch.mockClear();
+    await new Promise((r) => setTimeout(r, 50));
 
-    await handler({
-      message: "Here are the search results...",
-      channel: "telegram",
+    // Now send a text response — this gets queued (no risk flags)
+    // so it won't immediately call fetch, but it should not throw
+    transcriptCallback({
       sessionKey: "msg-test",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Here are the search results...",
+          },
+        ],
+      },
     });
+
+    await new Promise((r) => setTimeout(r, 50));
+    // No assertion on fetch — the event is batched, not sent immediately.
+    // The fact that no error was thrown is the test.
+  });
+
+  it("handles string arguments in tool calls", async () => {
+    transcriptCallback({
+      sessionKey: "string-args-test",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "exec",
+            arguments: '{"command":"ls -la","yieldMs":10000}',
+          },
+        ],
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockFetch).toHaveBeenCalled();
   });
 });

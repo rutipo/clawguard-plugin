@@ -49,15 +49,13 @@ export interface SessionEndRequest {
 // --- OpenClaw plugin types (minimal subset we use) ---
 
 export interface OpenClawPluginApi {
-  registerHook(event: string, handler: HookHandler | SyncHookHandler, opts?: { name?: string; description?: string }): void;
+  registerHook(event: string, handler: HookHandler, opts?: { name?: string; description?: string }): void;
   on(event: string, handler: HookHandler): void;
-  /** Per-conversation lifecycle hook — fires when an agent conversation binding is resolved */
-  onConversationBindingResolved?(callback: (binding: ConversationBinding) => void): void;
   /** Plugin-specific config from plugins.entries.<id>.config */
   pluginConfig: Record<string, unknown>;
   /** Full OpenClaw config snapshot */
   config?: Record<string, unknown>;
-  /** Runtime helpers */
+  /** Runtime helpers (includes events for agent event subscriptions) */
   runtime?: PluginRuntime;
   /** Scoped logger */
   logger?: { debug(...args: unknown[]): void; info(...args: unknown[]): void; warn(...args: unknown[]): void; error(...args: unknown[]): void };
@@ -65,20 +63,8 @@ export interface OpenClawPluginApi {
   registrationMode?: string;
 }
 
-/** Conversation binding — represents a resolved agent conversation context */
-export interface ConversationBinding {
-  on?(event: string, handler: HookHandler): void;
-  registerHook?(event: string, handler: HookHandler, opts?: { name?: string; description?: string }): void;
-  [key: string]: unknown;
-}
-
 export interface HookHandler {
   (ctx: HookContext): Promise<HookDecision | void>;
-}
-
-/** Synchronous hook handler (for tool_result_persist and before_message_write) */
-export interface SyncHookHandler {
-  (ctx: HookContext): HookContext | undefined;
 }
 
 export interface HookContext {
