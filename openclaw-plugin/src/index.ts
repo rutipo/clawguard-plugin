@@ -509,6 +509,24 @@ export default definePluginEntry({
               });
             }
           }
+
+          // Agent thinking/reasoning blocks — capture as decision events
+          if ((blockType === "thinking" || blockType === "reasoning") && role === "assistant") {
+            const text = String(block.text || block.thinking || block.reasoning || "");
+            if (text.length > 0) {
+              const session = sessions.get(sessionKey);
+              if (session) {
+                const data: Record<string, unknown> = {
+                  reasoning: truncate(text, 500),
+                };
+                if (pluginConfig.captureFullIo) {
+                  data.full_reasoning = truncate(text, pluginConfig.maxFullIoBytes);
+                }
+                const event = makeEvent(session, "decision", data);
+                client.queueEvent(event);
+              }
+            }
+          }
         }
       });
     }
