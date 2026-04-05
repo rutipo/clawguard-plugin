@@ -159,7 +159,7 @@ export class ClawGuardClient {
         "X-API-Key": this.config.apiKey,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
