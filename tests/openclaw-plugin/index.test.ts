@@ -179,6 +179,79 @@ describe("event-based monitoring (with API key)", () => {
     // The fact that no error was thrown is the test.
   });
 
+  it("captures thinking blocks as decision events", async () => {
+    // First trigger a tool call to create a session
+    transcriptCallback({
+      sessionKey: "thinking-test",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "search",
+            arguments: {},
+          },
+        ],
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Now send a thinking block
+    transcriptCallback({
+      sessionKey: "thinking-test",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            text: "I need to search for competitor pricing data to complete this analysis",
+          },
+        ],
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    // The thinking block creates a decision event which is queued (batched).
+    // No error thrown = success. The event will be flushed in the batch.
+  });
+
+  it("captures reasoning blocks as decision events", async () => {
+    // First trigger a tool call to create a session
+    transcriptCallback({
+      sessionKey: "reasoning-test",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            name: "read_file",
+            arguments: {},
+          },
+        ],
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Now send a reasoning block
+    transcriptCallback({
+      sessionKey: "reasoning-test",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "reasoning",
+            reasoning: "The user asked for the config file contents",
+          },
+        ],
+      },
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+    // No error thrown = success
+  });
+
   it("handles string arguments in tool calls", async () => {
     transcriptCallback({
       sessionKey: "string-args-test",

@@ -72,6 +72,61 @@ describe("ClawGuardClient", () => {
     });
   });
 
+  describe("validation and timers", () => {
+    it("throws for invalid backend URLs", () => {
+      expect(() => new ClawGuardClient(makeConfig({ backendUrl: "not a url" }))).toThrow(
+        /invalid backend url/i,
+      );
+    });
+
+    it("warns for public HTTP backend URLs", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      new ClawGuardClient(makeConfig({ backendUrl: "http://example.com" }));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("API key will be sent in cleartext"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("starts only one interval and reports interval flush failures", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const timer = { unref: vi.fn() };
+      let intervalCallback: (() => void) | undefined;
+      const setIntervalSpy = vi
+        .spyOn(globalThis, "setInterval")
+        .mockImplementation(((cb: TimerHandler) => {
+          intervalCallback = cb as () => void;
+          return timer as unknown as ReturnType<typeof setInterval>;
+        }) as typeof setInterval);
+      const clearIntervalSpy = vi
+        .spyOn(globalThis, "clearInterval")
+        .mockImplementation(() => undefined);
+
+      client = new ClawGuardClient(makeConfig());
+      const flushSpy = vi
+        .spyOn(client, "flush")
+        .mockRejectedValueOnce(new Error("interval boom"))
+        .mockResolvedValue(undefined);
+
+      client.start();
+      client.start();
+      intervalCallback?.();
+      await Promise.resolve();
+      await client.stop();
+
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(timer.unref).toHaveBeenCalledOnce();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+      expect(flushSpy).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[clawguard] flush error (agent unaffected):",
+        "interval boom",
+      );
+    });
+  });
+
   describe("endSession", () => {
     it("calls /v1/sessions/end", async () => {
       await client.endSession("sess-1", "completed");
@@ -101,6 +156,17 @@ describe("ClawGuardClient", () => {
   });
 
   describe("queueEvent + flush", () => {
+    it("drops the oldest buffered event when the max buffer size is exceeded", () => {
+      const overflowClient = new ClawGuardClient(makeConfig({ batchSize: 20_000 }));
+
+      for (let i = 0; i < 10_001; i++) {
+        overflowClient.queueEvent(makeEvent({ event_id: `evt-${i}` }));
+      }
+
+      expect((overflowClient as any).eventBuffer).toHaveLength(10_000);
+      expect((overflowClient as any).eventBuffer[0].event_id).toBe("evt-1");
+    });
+
     it("buffers events until flush", async () => {
       client.queueEvent(makeEvent({ event_id: "e1" }));
       client.queueEvent(makeEvent({ event_id: "e2" }));
@@ -132,6 +198,21 @@ describe("ClawGuardClient", () => {
       expect(mockFetch).toHaveBeenCalled();
     });
 
+    it("warns when auto-flush fails after the batch size is reached", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const autoClient = new ClawGuardClient(makeConfig({ batchSize: 1 }));
+      vi.spyOn(autoClient, "flush").mockRejectedValueOnce(new Error("auto flush failed"));
+
+      autoClient.queueEvent(makeEvent({ event_id: "e1" }));
+      await Promise.resolve();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[clawguard] flush error (agent unaffected):",
+        "auto flush failed",
+      );
+      warnSpy.mockRestore();
+    });
+
     it("flush is a no-op when buffer is empty", async () => {
       await client.flush();
       expect(mockFetch).not.toHaveBeenCalled();
@@ -152,6 +233,29 @@ describe("ClawGuardClient", () => {
       ).rejects.toThrow("ClawGuard API error: 401");
     });
 
+    it("retries timeout once for de-duplicated event endpoints", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockFetch.mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
+
+      await client.sendEventImmediate(makeEvent());
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("retrying once"),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("does not retry timeout for session creation", async () => {
+      mockFetch.mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));
+
+      await expect(
+        client.startSession("my-agent", "research task"),
+      ).rejects.toThrow("timed out");
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
     it("re-queues events on flush failure", async () => {
       client.queueEvent(makeEvent({ event_id: "e1" }));
       client.queueEvent(makeEvent({ event_id: "e2" }));
@@ -169,6 +273,28 @@ describe("ClawGuardClient", () => {
       await client.flush();
       const body = JSON.parse(mockFetch.mock.calls[1][1].body);
       expect(body.events).toHaveLength(2);
+    });
+
+    it("drops failed flush events when no buffer space remains", async () => {
+      const failedEvents = [
+        makeEvent({ event_id: "failed-1" }),
+        makeEvent({ event_id: "failed-2" }),
+      ];
+      const fakeClient: any = {
+        eventBuffer: failedEvents,
+        post: vi.fn().mockImplementation(async () => {
+          fakeClient.eventBuffer = Array.from({ length: 10_000 }, (_, i) =>
+            makeEvent({ event_id: `existing-${i}` }),
+          );
+          throw new Error("Network error");
+        }),
+      };
+
+      await expect((ClawGuardClient.prototype as any).flush.call(fakeClient)).rejects.toThrow(
+        "Network error",
+      );
+      expect(fakeClient.eventBuffer).toHaveLength(10_000);
+      expect(fakeClient.eventBuffer.some((event: EventPayload) => event.event_id === "failed-1")).toBe(false);
     });
   });
 });

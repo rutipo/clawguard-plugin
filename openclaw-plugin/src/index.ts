@@ -93,7 +93,7 @@ async function resolveSession(ctx: HookContext): Promise<ActiveSession> {
         oldestKey = k;
       }
     }
-    if (oldestKey) sessions.delete(oldestKey);
+    sessions.delete(oldestKey!);
   }
 
   // Create a new session
@@ -278,7 +278,7 @@ function handleToolResult(
 
   if (riskFlags.length > 0) {
     client.sendEventImmediate(event).catch((err) => {
-      console.error("[clawguard] send error:", err.message);
+      console.warn("[clawguard] send error (agent unaffected):", err.message);
     });
   } else {
     client.queueEvent(event);
@@ -346,7 +346,7 @@ async function endSessionForKey(
   try {
     await client.endSession(session.sessionId, status);
   } catch (err) {
-    console.error("[clawguard] end session error:", (err as Error).message);
+    console.warn("[clawguard] end session error (agent unaffected):", (err as Error).message);
   }
 
   sessions.delete(key);
@@ -383,6 +383,29 @@ function loadConfig(api: OpenClawPluginApi): ClawGuardPluginConfig {
   }
 
   return config;
+}
+
+function resetStateForTests(): void {
+  sessions.clear();
+  initialized = false;
+  _global[INIT_KEY] = false;
+}
+
+function setStateForTests(state: {
+  client?: ClawGuardClient;
+  pluginConfig?: ClawGuardPluginConfig;
+  initialized?: boolean;
+}): void {
+  if (state.client) {
+    client = state.client;
+  }
+  if (state.pluginConfig) {
+    pluginConfig = state.pluginConfig;
+  }
+  if (typeof state.initialized === "boolean") {
+    initialized = state.initialized;
+    _global[INIT_KEY] = state.initialized;
+  }
 }
 
 /**
@@ -480,7 +503,8 @@ export default definePluginEntry({
               agentId: pluginConfig.agentId,
             };
             handleToolCall(ctx).catch(err => {
-              console.error("[clawguard] tool call error:", (err as Error).message);
+              // Log as warning — monitoring errors should not disrupt the agent
+              console.warn("[clawguard] monitoring error (agent unaffected):", (err as Error).message);
             });
           }
 
@@ -505,7 +529,7 @@ export default definePluginEntry({
                 agentId: pluginConfig.agentId,
               };
               handleMessage(ctx).catch(err => {
-                console.error("[clawguard] message error:", (err as Error).message);
+                console.warn("[clawguard] message error (agent unaffected):", (err as Error).message);
               });
             }
           }
@@ -559,7 +583,7 @@ export default definePluginEntry({
 
         if (/start|begin|invoke|call/i.test(dataType) || /start/i.test(stream)) {
           handleToolCall(ctx).catch(err => {
-            console.error("[clawguard] agent event error:", (err as Error).message);
+            console.warn("[clawguard] agent event error (agent unaffected):", (err as Error).message);
           });
         } else if (/end|complete|result|done/i.test(dataType) || /end|result/i.test(stream)) {
           const session = sessions.get(sessionKey);
@@ -578,6 +602,21 @@ export default definePluginEntry({
 });
 
 // Export for direct usage / testing
+export const __testing = {
+  MAX_SESSIONS,
+  SESSION_TTL_MS,
+  sessions,
+  resolveSession,
+  makeEvent,
+  truncate,
+  handleToolCall,
+  handleToolResult,
+  handleMessage,
+  endSessionForKey,
+  loadConfig,
+  resetStateForTests,
+  setStateForTests,
+};
 export { ClawGuardClient } from "./client.js";
 export { detectSensitiveContent, isHighRiskTool, isSensitivePath } from "./sensitive.js";
 export type { AnalyzeThreadRequest, AnalyzeThreadResponse, ClawGuardPluginConfig, EventPayload } from "./types.js";

@@ -18,6 +18,12 @@ import type {
 
 /** Max queued events before oldest are dropped to prevent memory exhaustion. */
 const MAX_BUFFER_SIZE = 10_000;
+const TIMEOUT_RETRY_PATHS = new Set([
+  "/v1/events",
+  "/v1/events/batch",
+  "/v1/sessions/end",
+  "/v1/analyze-thread",
+]);
 
 export class ClawGuardClient {
   private config: ClawGuardPluginConfig;
@@ -74,7 +80,7 @@ export class ClawGuardClient {
     if (this.flushTimer) return;
     this.flushTimer = setInterval(() => {
       this.flush().catch((err) => {
-        console.error("[clawguard] flush error:", err.message);
+        console.warn("[clawguard] flush error (agent unaffected):", err.message);
       });
     }, this.config.flushIntervalMs);
     // Don't let the timer prevent the process from exiting
@@ -115,7 +121,7 @@ export class ClawGuardClient {
     this.eventBuffer.push(event);
     if (this.eventBuffer.length >= this.config.batchSize) {
       this.flush().catch((err) => {
-        console.error("[clawguard] flush error:", err.message);
+        console.warn("[clawguard] flush error (agent unaffected):", err.message);
       });
     }
   }
@@ -149,26 +155,44 @@ export class ClawGuardClient {
     return this.post<AnalyzeThreadResponse>("/v1/analyze-thread", request);
   }
 
-  /** Make an authenticated POST request to the backend. */
+  /** Make an authenticated POST request to the backend with one retry on timeout. */
   private async post<T = unknown>(path: string, body: unknown): Promise<T> {
     const url = `${this.config.backendUrl}${path}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": this.config.apiKey,
-      },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30_000),
-    });
+    const maxAttempts = TIMEOUT_RETRY_PATHS.has(path) ? 2 : 1;
 
-    if (!response.ok) {
-      // Don't include response body — it may contain sensitive data or be attacker-controlled
-      throw new Error(
-        `ClawGuard API error: ${response.status} ${response.statusText}`,
-      );
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-Key": this.config.apiKey,
+          },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30_000),
+        });
+
+        if (!response.ok) {
+          // Don't include response body — it may contain sensitive data or be attacker-controlled
+          throw new Error(
+            `ClawGuard API error: ${response.status} ${response.statusText}`,
+          );
+        }
+
+        return response.json() as Promise<T>;
+      } catch (err) {
+        const isTimeout =
+          err instanceof DOMException && err.name === "TimeoutError";
+        if (isTimeout && attempt === 0 && maxAttempts > 1) {
+          // Retry only for stateless or de-duplicated endpoints.
+          console.warn("[clawguard] request timed out, retrying once (backend may be waking up)");
+          continue;
+        }
+        throw err;
+      }
     }
 
-    return response.json() as Promise<T>;
+    /* v8 ignore next */
+    throw new Error("ClawGuard API: unexpected retry loop exit");
   }
 }
