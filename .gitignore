@@ -1,5 +1,6 @@
 node_modules/
 dist/
+openclaw-plugin/coverage/
 
 .env
 .env.*

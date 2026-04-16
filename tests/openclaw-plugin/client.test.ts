@@ -246,6 +246,21 @@ describe("ClawGuardClient", () => {
       );
     });
 
+    it("throws a sanitized non-auth API error without exposing response bodies", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        text: () => Promise.resolve("internal upstream details"),
+      });
+
+      await expect(
+        client.sendEventImmediate(makeEvent()),
+      ).rejects.toThrow(
+        "ClawGuard API error on /v1/events: 503 Service Unavailable",
+      );
+    });
+
     it("retries timeout once for de-duplicated event endpoints", async () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       mockFetch.mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"));

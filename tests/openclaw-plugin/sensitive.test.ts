@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  __testing as sensitiveTesting,
   assessToolCall,
   detectSensitiveContent,
   extractCommandText,
@@ -361,5 +362,15 @@ describe("shell command helpers", () => {
       isHighRisk: false,
       operationKind: "tool_call",
     });
+  });
+
+  it("exposes parsing and search helpers through testing exports", () => {
+    expect(sensitiveTesting.looksLikePlaceholderValue("\"\"")).toBe(true);
+    expect(sensitiveTesting.parseStructuredPayload("{bad json}")).toBeUndefined();
+    expect(sensitiveTesting.requestPayloadLooksLikeSearch(undefined)).toBe(false);
+    expect(sensitiveTesting.requestPayloadLooksLikeSearch({
+      body: "q=latest+pricing",
+    })).toBe(true);
+    expect(sensitiveTesting.requestLooksLikeWebSearch("google_lookup", undefined)).toBe(true);
   });
 });

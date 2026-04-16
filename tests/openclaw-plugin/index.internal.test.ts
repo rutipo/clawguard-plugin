@@ -469,6 +469,24 @@ describe("index __testing helpers", () => {
     );
   });
 
+  it("exposes internal fingerprint helpers for deterministic testing", async () => {
+    const mod = await loadModule();
+
+    expect(mod.__testing.stableSerialize(["beta", { alpha: 1 }])).toBe("[\"beta\",{\"alpha\":1}]");
+
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1000);
+    expect(mod.__testing.shouldCaptureEvent("stale")).toBe(true);
+    nowSpy.mockRestore();
+
+    mod.__testing.pruneRecentEventFingerprints(2000);
+    expect(mod.__testing.shouldCaptureEvent("stale")).toBe(true);
+    expect(mod.__testing.shouldCaptureEvent("fresh")).toBe(true);
+    expect(mod.__testing.shouldCaptureEvent("fresh")).toBe(false);
+
+    await mod.__testing.captureMessage({ sessionKey: "main" });
+    expect(true).toBe(true);
+  });
+
   it("ignores blank string config values so stale entries do not override safe defaults", async () => {
     const mod = await loadModule();
     process.env.CLAWGUARD_BACKEND_URL = "   ";
@@ -587,6 +605,39 @@ describe("index register edge cases", () => {
     expect(logSpy).not.toHaveBeenCalledWith("[clawguard] Monitoring active");
   });
 
+  it("stays inactive when no API key is configured", async () => {
+    const mod = await loadModule();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(globalThis, "setInterval").mockImplementation(
+      (() => ({ unref: vi.fn() } as unknown as ReturnType<typeof setInterval>)) as typeof setInterval,
+    );
+
+    mod.default.register({
+      pluginConfig: { apiKey: "", agentId: "plugin-agent", backendUrl: "http://localhost:8000" },
+      config: {
+        plugins: {
+          entries: {
+            "clawguard-monitor": {
+              enabled: true,
+            },
+          },
+        },
+      },
+      runtime: {
+        events: {
+          onSessionTranscriptUpdate: vi.fn(),
+          onAgentEvent: vi.fn(),
+        },
+      },
+    } as any);
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("No API key configured"),
+    );
+    expect(logSpy).not.toHaveBeenCalledWith("[clawguard] Monitoring active");
+  });
+
   it("accepts the explicit enabled flag from the full config snapshot", async () => {
     const debug = vi.fn();
 
@@ -617,6 +668,31 @@ describe("index register edge cases", () => {
 
     expect(debug).toHaveBeenCalledWith(
       expect.stringContaining("backend: http://localhost:8000, agent: plugin-agent"),
+    );
+  });
+
+  it("logs resolved config warnings during registration", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.CLAWGUARD_API_KEY = "env-key";
+
+    await registerWithRuntime({
+      pluginConfig: { apiKey: "plugin-key", agentId: "plugin-agent", backendUrl: "http://localhost:8000" },
+      config: {
+        plugins: {
+          entries: {
+            "clawguard-monitor": {
+              enabled: true,
+              config: {
+                apiKey: "config-key",
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("CLAWGUARD_API_KEY is overriding"),
     );
   });
 
@@ -705,6 +781,73 @@ describe("index register edge cases", () => {
       .filter((body) => body.event_type === "tool_call");
 
     expect(toolCalls).toHaveLength(1);
+  });
+
+  it("logs compatibility-hook specific failures without breaking monitoring", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { mod, api } = await registerWithRuntime();
+    const onMock = api.on as { mock: { calls: Array<[string, Function]> } };
+    const hookHandlers = Object.fromEntries(
+      onMock.mock.calls.map(([name, handler]) => [name, handler]),
+    ) as Record<string, Function>;
+
+    const failingStartClient = makeMockClient();
+    failingStartClient.startSession.mockRejectedValueOnce(new Error("hook tool failure"));
+    mod.__testing.setStateForTests({ client: failingStartClient as any, pluginConfig: makeConfig() });
+    hookHandlers.before_tool_call({
+      sessionKey: "hook-error-tool",
+      tool: "exec",
+      args: { command: "Get-ChildItem" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    mod.__testing.sessions.set("hook-error-result", makeSession());
+    hookHandlers.after_tool_call({
+      sessionKey: "hook-error-result",
+      tool: "browser_search",
+      result: {
+        toString() {
+          throw new Error("hook result failure");
+        },
+      },
+    });
+
+    const failingMessageClient = makeMockClient();
+    failingMessageClient.queueEvent.mockImplementation(() => {
+      throw new Error("hook message failure");
+    });
+    mod.__testing.sessions.set("hook-error-message", makeSession());
+    mod.__testing.setStateForTests({ client: failingMessageClient as any, pluginConfig: makeConfig() });
+    hookHandlers.message_sent({
+      sessionKey: "hook-error-message",
+      message: "benign update",
+      channel: "agent",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const failingEndClient = makeMockClient();
+    failingEndClient.sendEventImmediate.mockRejectedValueOnce(new Error("hook session end failure"));
+    mod.__testing.sessions.set("hook-error-end", makeSession());
+    mod.__testing.setStateForTests({ client: failingEndClient as any, pluginConfig: makeConfig() });
+    hookHandlers.session_end({ sessionKey: "hook-error-end" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[clawguard] hook monitoring error (agent unaffected):",
+      "hook tool failure",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[clawguard] hook result error (agent unaffected):",
+      "hook result failure",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[clawguard] hook message error (agent unaffected):",
+      "hook message failure",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[clawguard] hook session end error (agent unaffected):",
+      "hook session end failure",
+    );
   });
 
   it("disables monitoring and stops the client if startup fails after the client was created", async () => {

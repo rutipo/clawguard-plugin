@@ -531,8 +531,6 @@ function parseStructuredPayload(value: unknown): Record<string, unknown> | undef
   } catch {
     return undefined;
   }
-
-  return undefined;
 }
 
 function hasBlockedSearchPayloadKey(record: Record<string, unknown>): boolean {
@@ -841,3 +839,10 @@ export function assessToolCall(
     canEgressData: false,
   };
 }
+
+export const __testing = {
+  looksLikePlaceholderValue,
+  parseStructuredPayload,
+  requestPayloadLooksLikeSearch,
+  requestLooksLikeWebSearch,
+};
