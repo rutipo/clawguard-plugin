@@ -1,6 +1,7 @@
 node_modules/
 dist/
 openclaw-plugin/coverage/
+.pytest_cache/
 
 .env
 .env.*
