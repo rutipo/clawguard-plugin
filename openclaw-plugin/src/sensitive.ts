@@ -89,6 +89,66 @@ const NON_SENSITIVE_PATHS = [
   /(^|[\\/])sample\.env\b/,
   /(^|[\\/])template\.env\b/,
   /(^|[\\/])(__fixtures__|fixtures?|testdata|samples?|examples?)([\\/]|$)/,
+  /(^|[\\/])docs?([\\/]|$)/,
+  /(^|[\\/])README(?:\.[^.\\/]+)?$/i,
+  /(^|[\\/])CHANGELOG(?:\.[^.\\/]+)?$/i,
+  /(^|[\\/])LICENSE(?:\.[^.\\/]+)?$/i,
+];
+
+const MEMORY_PATH_PATTERNS = [
+  /(^|[\\/])(?:claude|agents|memory)\.md$/i,
+  /(^|[\\/])\.(?:claude|codex|openclaw|clawguard|cursor|windsurf|roo)([\\/]|$)/,
+];
+
+const LOCAL_CONFIG_PATH_PATTERNS = [
+  /(^|[\\/])package(?:-lock)?\.json$/i,
+  /(^|[\\/])pnpm-lock\.ya?ml$/i,
+  /(^|[\\/])yarn\.lock$/i,
+  /(^|[\\/])\.vscode([\\/]|$)/i,
+  /(^|[\\/])\.devcontainer([\\/]|$)/i,
+  /(^|[\\/])pyproject\.toml$/i,
+  /(^|[\\/])poetry\.lock$/i,
+  /(^|[\\/])requirements(?:\.[^.\\/]+)?\.txt$/i,
+  /(^|[\\/])cargo\.(?:toml|lock)$/i,
+  /(^|[\\/])go\.(?:mod|sum)$/i,
+  /(^|[\\/])composer\.(?:json|lock)$/i,
+  /(^|[\\/])tsconfig(?:\.[^.\\/]+)?\.json$/i,
+  /(^|[\\/])\.eslintrc(?:\.[^.\\/]+)?$/i,
+  /(^|[\\/])eslint\.config\.[^.\\/]+$/i,
+  /(^|[\\/])\.prettierrc(?:\.[^.\\/]+)?$/i,
+  /(^|[\\/])prettier\.config\.[^.\\/]+$/i,
+  /(^|[\\/])vitest\.config\.[^.\\/]+$/i,
+  /(^|[\\/])jest\.config\.[^.\\/]+$/i,
+  /(^|[\\/])ruff\.toml$/i,
+  /(^|[\\/])mypy\.ini$/i,
+  /(^|[\\/])pytest\.ini$/i,
+  /(^|[\\/])\.editorconfig$/i,
+  /(^|[\\/])\.gitignore$/i,
+];
+
+const EXECUTION_SURFACE_PATH_PATTERNS = [
+  /(^|[\\/])\.github[\\/]workflows[\\/]/,
+  /(^|[\\/])\.git[\\/]hooks[\\/]/,
+  /(^|[\\/])dockerfile(?:\.[^.\\/]+)?$/i,
+  /(^|[\\/])(?:docker-)?compose\.(?:ya?ml)$/i,
+  /(^|[\\/])procfile$/i,
+  /(^|[\\/])railway\.json$/i,
+  /(^|[\\/])netlify\.toml$/i,
+  /(^|[\\/])vercel\.json$/i,
+];
+
+const SYSTEM_PERSISTENCE_PATH_PATTERNS = [
+  /^\$profile$/i,
+  /(^|[\\/])\.bash(?:rc|_profile)$/i,
+  /(^|[\\/])\.zshrc$/i,
+  /(^|[\\/])\.profile$/i,
+  /(^|[\\/])(?:microsoft\.)?powershell_profile\.ps1$/i,
+  /(^|[\\/])profile\.ps1$/i,
+  /(^|[\\/])crontab$/i,
+  /(^|[\\/])etc[\\/]cron\./i,
+  /(^|[\\/])etc[\\/]systemd[\\/]/i,
+  /(^|[\\/])library[\\/]launchagents[\\/]/i,
+  /(^|[\\/])appdata[\\/]roaming[\\/]microsoft[\\/]windows[\\/]start menu[\\/]programs[\\/]startup[\\/]/i,
 ];
 
 const LOW_IMPACT_SENSITIVE_MATCHES = new Set([
@@ -136,6 +196,41 @@ export function isSensitivePath(path: string): boolean {
 
 export function hasHighImpactSensitiveMatch(matches: string[]): boolean {
   return matches.some((match) => !LOW_IMPACT_SENSITIVE_MATCHES.has(match));
+}
+
+export function classifyTargetPath(path: string): string {
+  if (!path) return "unknown";
+
+  const normalized = path.replace(/\\/g, "/").toLowerCase();
+  if (/^https?:\/\//.test(normalized)) {
+    return "unknown";
+  }
+
+  if (NON_SENSITIVE_PATHS.some((pattern) => pattern.test(normalized))) {
+    return "workspace_file";
+  }
+
+  if (SENSITIVE_PATHS.some((pattern) => pattern.test(normalized))) {
+    return "secret_store";
+  }
+
+  if (SYSTEM_PERSISTENCE_PATH_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return "system_persistence";
+  }
+
+  if (EXECUTION_SURFACE_PATH_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return "execution_surface";
+  }
+
+  if (MEMORY_PATH_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return "memory_file";
+  }
+
+  if (LOCAL_CONFIG_PATH_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return "local_config";
+  }
+
+  return "workspace_file";
 }
 
 /**
@@ -254,6 +349,80 @@ const SEARCH_ALLOWED_KEYS = new Set([
   "filters",
 ]);
 
+const READ_QUERY_HINTS = [
+  "graphql",
+  "jql",
+  "query",
+  "retrieval",
+  "vector",
+  "search",
+  "lookup",
+];
+
+const READ_QUERY_URL_PATTERNS = [
+  /\/graphql\b/i,
+  /\/(?:search|query|lookup|retrieval)\b/i,
+  /\/search\/jql\b/i,
+  /\/vector\b/i,
+];
+
+const READ_QUERY_KEYS = new Set([
+  "query",
+  "variables",
+  "operationname",
+  "jql",
+  "ql",
+  "searchtext",
+  "text",
+  "q",
+  "term",
+  "terms",
+  "topic",
+  "keywords",
+  "filter",
+  "filters",
+]);
+
+const READ_QUERY_ALLOWED_KEYS = new Set([
+  ...READ_QUERY_KEYS,
+  "limit",
+  "count",
+  "maxresults",
+  "topk",
+  "k",
+  "cursor",
+  "offset",
+  "page",
+  "pagesize",
+  "sort",
+  "order",
+  "fields",
+  "project",
+  "repo",
+  "owner",
+  "gl",
+  "hl",
+  "num",
+  "after",
+  "before",
+  "first",
+  "last",
+  "expand",
+  "include",
+  "exclude",
+  "language",
+  "lang",
+  "locale",
+  "region",
+  "country",
+  "market",
+  "safe",
+  "safesearch",
+  "freshness",
+  "timerange",
+  "daterange",
+]);
+
 const SEARCH_BLOCKED_KEYS = new Set([
   "file",
   "files",
@@ -271,17 +440,31 @@ const SEARCH_BLOCKED_KEYS = new Set([
 
 const READ_ONLY_COMMAND_PATTERNS = [
   /^(get-childitem|gci|dir)\b/,
+  /^(get-item|gi)\b/,
   /^(get-content|gc|type|cat)\b/,
   /^(select-string|sls|findstr|rg|grep)\b/,
+  /^(resolve-path|test-path|get-command|get-location|where|which)\b/,
+  /^(get-process|ps|get-service)\b/,
   /^(ls|find|pwd|realpath|stat|wc|head|tail)\b/,
+  /^tree\b/,
   /^sed\s+-n\b/,
   /^git\s+(status|diff|log|show)\b/,
   /^git\s+grep\b/,
+  /^git\s+(ls-files|rev-parse|worktree\s+list)\b/,
+  /^git\s+remote(?:\s+-v|\s+show|\s*$)/,
+  /^git\s+branch\s+--show-current\b/,
   /^(pytest|vitest|jest|mocha|ava|nose2?|rspec)\b/,
   /^(npm|pnpm|yarn)\s+(test|run test|run lint|run build)\b/,
   /^(cargo|go|dotnet|mvn|gradle)\s+(test|build|check)\b/,
   /^python\s+-m\s+(pytest|compileall)\b/,
   /^(tsc|eslint|ruff|mypy|flake8|black)\b/,
+];
+
+const LOCAL_DEV_COMMAND_PATTERNS = [
+  /^(npm|pnpm|yarn)\s+(run\s+dev|dev)\b/,
+  /^uvicorn\b.*\b--reload\b/,
+  /^python\s+-m\s+http\.server\b/,
+  /^docker(?:\s+compose)?\s+logs\b/,
 ];
 
 const GIT_WORKFLOW_COMMAND_PATTERNS = [
@@ -302,6 +485,9 @@ const PACKAGE_INSTALL_COMMAND_PATTERNS = [
 const FILE_WRITE_COMMAND_PATTERNS = [
   /^(set-content|add-content|out-file|copy-item|move-item|rename-item|new-item|mkdir)\b/,
   /^(cp|mv|touch|mkdir)\b/,
+  /^tee(?:-object)?\b/,
+  /^echo\b.+\s>{1,2}\s*\S+/,
+  /^printf\b.+\s>{1,2}\s*\S+/,
   /^git\s+(apply|am)\b/,
 ];
 
@@ -378,6 +564,29 @@ function stripWrappingQuotes(value: string): string {
   return value;
 }
 
+function extractFlagValue(command: string, flagNames: string[]): string {
+  const pattern = new RegExp(`-(?:${flagNames.join("|")})\\s+("[^"]+"|'[^']+'|\\S+)`, "i");
+  const match = command.match(pattern);
+  return match?.[1] ? stripWrappingQuotes(match[1]) : "";
+}
+
+function joinPathSegments(basePath: string, childName: string): string {
+  if (!basePath) {
+    return childName;
+  }
+
+  if (!childName) {
+    return basePath;
+  }
+
+  if (/^[A-Za-z]:[\\/]/.test(childName) || /^[\\/]{1,2}/.test(childName)) {
+    return childName;
+  }
+
+  const separator = basePath.includes("\\") ? "\\" : "/";
+  return basePath.replace(/[\\/]+$/, "") + separator + childName.replace(/^[\\/]+/, "");
+}
+
 export function extractCommandText(args?: Record<string, unknown>): string {
   if (!args) return "";
 
@@ -405,6 +614,11 @@ function isGitWorkflowCommand(command: string): boolean {
 function isPackageInstallCommand(command: string): boolean {
   const normalized = normalizeCommand(command);
   return PACKAGE_INSTALL_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function isLocalDevCommand(command: string): boolean {
+  const normalized = normalizeCommand(command);
+  return LOCAL_DEV_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function isFileWriteCommand(command: string): boolean {
@@ -461,9 +675,15 @@ function extractStringArg(
 export function extractTargetFromCommand(command: string): string {
   if (!command) return "";
 
-  const pathFlagMatch = command.match(/-(?:literalpath|path|infile|outfile)\s+("[^"]+"|'[^']+'|\S+)/i);
-  if (pathFlagMatch?.[1]) {
-    return stripWrappingQuotes(pathFlagMatch[1]);
+  const pathFlagValue = extractFlagValue(command, ["literalpath", "path", "filepath", "infile", "outfile"]);
+  const nameFlagValue = extractFlagValue(command, ["name"]);
+
+  if (/^(?:new-item|ni)\b/i.test(command) && nameFlagValue) {
+    return joinPathSegments(pathFlagValue, nameFlagValue);
+  }
+
+  if (pathFlagValue) {
+    return pathFlagValue;
   }
 
   const urlMatch = command.match(/\bhttps?:\/\/\S+/i);
@@ -477,6 +697,27 @@ export function extractTargetFromCommand(command: string): string {
     if (!candidate.startsWith("-")) {
       return candidate;
     }
+  }
+
+  const newItemMatch = command.match(/^(?:new-item|mkdir|touch)\s+("[^"]+"|'[^']+'|\S+)/i);
+  if (newItemMatch?.[1]) {
+    const candidate = stripWrappingQuotes(newItemMatch[1]);
+    if (!candidate.startsWith("-")) {
+      return candidate;
+    }
+  }
+
+  const teeMatch = command.match(/^(?:tee(?:-object)?|out-file)\s+("[^"]+"|'[^']+'|\S+)/i);
+  if (teeMatch?.[1]) {
+    const candidate = stripWrappingQuotes(teeMatch[1]);
+    if (!candidate.startsWith("-")) {
+      return candidate;
+    }
+  }
+
+  const redirectMatch = command.match(/>{1,2}\s*("[^"]+"|'[^']+'|\S+)$/i);
+  if (redirectMatch?.[1]) {
+    return stripWrappingQuotes(redirectMatch[1]);
   }
 
   return "";
@@ -555,6 +796,29 @@ function payloadLooksLikeSearch(record: Record<string, unknown>): boolean {
   return keys.every((key) => SEARCH_ALLOWED_KEYS.has(key));
 }
 
+function payloadLooksLikeReadQuery(record: Record<string, unknown>): boolean {
+  const keys = Object.keys(record).map(normalizePayloadKey);
+  if (keys.length === 0) {
+    return false;
+  }
+
+  if (hasBlockedSearchPayloadKey(record)) {
+    return false;
+  }
+
+  const queryValue = record.query;
+  if (typeof queryValue === "string" && /\bmutation\b/i.test(queryValue)) {
+    return false;
+  }
+
+  const hasQueryField = keys.some((key) => READ_QUERY_KEYS.has(key));
+  if (!hasQueryField) {
+    return false;
+  }
+
+  return keys.every((key) => READ_QUERY_ALLOWED_KEYS.has(key));
+}
+
 function textPayloadLooksLikeSearch(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   if (!normalized) {
@@ -583,6 +847,28 @@ function requestPayloadLooksLikeSearch(args?: Record<string, unknown>): boolean 
     const structured = parseStructuredPayload(value);
     if (structured && payloadLooksLikeSearch(structured)) {
       return true;
+    }
+  }
+
+  return false;
+}
+
+function requestPayloadLooksLikeReadQuery(args?: Record<string, unknown>): boolean {
+  if (!args) {
+    return false;
+  }
+
+  for (const key of ["body", "data", "json", "form"]) {
+    const value = args[key];
+    if (typeof value === "string") {
+      const structured = parseStructuredPayload(value);
+      if (structured && payloadLooksLikeReadQuery(structured)) {
+        return true;
+      }
+    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      if (payloadLooksLikeReadQuery(value as Record<string, unknown>)) {
+        return true;
+      }
     }
   }
 
@@ -629,11 +915,48 @@ function requestLooksLikeWebSearch(toolName: string, args?: Record<string, unkno
   return requestPayloadLooksLikeSearch(args);
 }
 
+function requestLooksLikeExternalReadQuery(toolName: string, args?: Record<string, unknown>): boolean {
+  if (!args) {
+    return false;
+  }
+
+  const normalizedTool = toolName.toLowerCase();
+  const method = extractHttpMethod(toolName, args);
+  if (!["POST", "GET", "HEAD", "OPTIONS"].includes(method)) {
+    return false;
+  }
+
+  const url = extractRequestUrl(args);
+  const explicitQuery = extractStringArg(args, ["query", "jql", "q"]);
+  const payloadLooksReadOnly = requestPayloadLooksLikeReadQuery(args);
+  const urlLooksReadLike = url ? READ_QUERY_URL_PATTERNS.some((pattern) => pattern.test(url)) : false;
+  const toolLooksReadLike = READ_QUERY_HINTS.some((hint) => normalizedTool.includes(hint));
+
+  if (payloadLooksReadOnly && (urlLooksReadLike || toolLooksReadLike)) {
+    return true;
+  }
+
+  if (explicitQuery && (!requestHasPayload(args) || payloadLooksReadOnly)) {
+    return true;
+  }
+
+  return false;
+}
+
 function assessHttpLikeTool(toolName: string, args?: Record<string, unknown>): ToolRiskAssessment {
   if (requestLooksLikeWebSearch(toolName, args)) {
     return {
       toolCategory: "discovery",
       operationKind: "web_search",
+      isHighRisk: false,
+      canEgressData: false,
+    };
+  }
+
+  if (requestLooksLikeExternalReadQuery(toolName, args)) {
+    return {
+      toolCategory: "discovery",
+      operationKind: "external_read_query",
       isHighRisk: false,
       canEgressData: false,
     };
@@ -675,6 +998,15 @@ function assessShellLikeTool(command: string): ToolRiskAssessment {
     return {
       toolCategory: "shell",
       operationKind: "read_only",
+      isHighRisk: false,
+      canEgressData: false,
+    };
+  }
+
+  if (isLocalDevCommand(command)) {
+    return {
+      toolCategory: "system",
+      operationKind: "local_dev_runtime",
       isHighRisk: false,
       canEgressData: false,
     };
@@ -759,6 +1091,59 @@ function assessShellLikeTool(command: string): ToolRiskAssessment {
   };
 }
 
+function applyTargetRiskContext(
+  assessment: ToolRiskAssessment,
+  args?: Record<string, unknown>,
+): ToolRiskAssessment {
+  const explicitTarget = extractStringArg(args, ["path", "file", "filename", "target"]);
+  const commandTarget = extractTargetFromCommand(extractCommandText(args));
+  const target = explicitTarget || commandTarget;
+  if (!target) {
+    return assessment;
+  }
+
+  const targetKind = classifyTargetPath(target);
+  if (assessment.operationKind !== "file_write") {
+    return targetKind === "secret_store"
+      ? { ...assessment, operationKind: assessment.operationKind === "read_only" ? "secret_store_read" : assessment.operationKind }
+      : assessment;
+  }
+
+  if (targetKind === "memory_file") {
+    return { ...assessment, operationKind: "memory_write" };
+  }
+
+  if (targetKind === "local_config") {
+    return { ...assessment, operationKind: "config_write" };
+  }
+
+  if (targetKind === "execution_surface") {
+    return {
+      ...assessment,
+      operationKind: "execution_surface_write",
+      isHighRisk: true,
+      severity: "medium",
+      title: "Execution-surface file update",
+    };
+  }
+
+  if (targetKind === "system_persistence") {
+    return {
+      ...assessment,
+      operationKind: "system_persistence_write",
+      isHighRisk: true,
+      severity: "high",
+      title: "Persistence or startup file update",
+    };
+  }
+
+  if (targetKind === "secret_store") {
+    return { ...assessment, operationKind: "secret_store_write" };
+  }
+
+  return assessment;
+}
+
 /**
  * Check if a tool name is considered high-risk (outbound/execution).
  */
@@ -798,51 +1183,54 @@ export function assessToolCall(
   }
 
   if (HTTP_LIKE_TOOLS.has(normalizedTool)) {
-    return assessHttpLikeTool(normalizedTool, args);
+    return applyTargetRiskContext(assessHttpLikeTool(normalizedTool, args), args);
   }
 
   if (SHELL_LIKE_TOOLS.has(normalizedTool)) {
-    return assessShellLikeTool(extractCommandText(args));
+    return applyTargetRiskContext(assessShellLikeTool(extractCommandText(args)), args);
   }
 
   if (normalizedTool.includes("read")) {
-    return {
+    return applyTargetRiskContext({
       toolCategory: "filesystem",
       operationKind: "file_read",
       isHighRisk: false,
       canEgressData: false,
-    };
+    }, args);
   }
 
   if (normalizedTool.includes("write") || normalizedTool.includes("edit") || normalizedTool.includes("patch")) {
-    return {
+    return applyTargetRiskContext({
       toolCategory: "filesystem",
       operationKind: "file_write",
       isHighRisk: false,
       canEgressData: false,
-    };
+    }, args);
   }
 
   if (normalizedTool.includes("search") || normalizedTool.includes("grep") || normalizedTool.includes("find")) {
-    return {
+    return applyTargetRiskContext({
       toolCategory: "discovery",
       operationKind: "search",
       isHighRisk: false,
       canEgressData: false,
-    };
+    }, args);
   }
 
-  return {
+  return applyTargetRiskContext({
     toolCategory: "unknown",
     operationKind: "tool_call",
     isHighRisk: false,
     canEgressData: false,
-  };
+  }, args);
 }
 
 export const __testing = {
+  classifyTargetPath,
   looksLikePlaceholderValue,
   parseStructuredPayload,
+  payloadLooksLikeReadQuery,
+  requestLooksLikeExternalReadQuery,
   requestPayloadLooksLikeSearch,
   requestLooksLikeWebSearch,
 };

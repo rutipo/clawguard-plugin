@@ -28,6 +28,7 @@ import { randomUUID } from "node:crypto";
 import { ClawGuardClient } from "./client.js";
 import {
   assessToolCall,
+  classifyTargetPath,
   detectSensitiveContent,
   extractCommandText,
   extractTargetFromCommand,
@@ -450,11 +451,18 @@ async function handleToolCall(ctx: HookContext): Promise<void> {
   // Check for sensitive file path in args
   const explicitPathArg =
     (toolArgs.path as string) ||
+    (toolArgs.literalPath as string) ||
     (toolArgs.file as string) ||
     (toolArgs.filename as string) ||
+    (toolArgs.target as string) ||
+    (toolArgs.url as string) ||
+    (toolArgs.uri as string) ||
+    (toolArgs.endpoint as string) ||
+    (toolArgs.href as string) ||
     "";
   const commandText = extractCommandText(toolArgs);
   const inferredTarget = explicitPathArg || extractTargetFromCommand(commandText);
+  const targetKind = inferredTarget ? classifyTargetPath(inferredTarget) : "";
   if (inferredTarget && isSensitivePath(inferredTarget)) {
     riskFlags.push("sensitive_path");
     session.sensitiveAccessed = true;
@@ -494,6 +502,9 @@ async function handleToolCall(ctx: HookContext): Promise<void> {
 
   if (inferredTarget) {
     data.target = inferredTarget;
+    if (targetKind) {
+      data.target_kind = targetKind;
+    }
   }
 
   if (sensitiveInput.length > 0) {

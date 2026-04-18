@@ -131,6 +131,21 @@ describe("isSensitivePath", () => {
   });
 });
 
+describe("classifyTargetPath", () => {
+  it("distinguishes ordinary workspace files from memory, config, and risky write surfaces", () => {
+    expect(sensitiveTesting.classifyTargetPath("/repo/docs/notes.md")).toBe("workspace_file");
+    expect(sensitiveTesting.classifyTargetPath("/repo/.claude/CLAUDE.md")).toBe("memory_file");
+    expect(sensitiveTesting.classifyTargetPath("/repo/package.json")).toBe("local_config");
+    expect(sensitiveTesting.classifyTargetPath("/repo/.github/workflows/deploy.yml")).toBe("execution_surface");
+    expect(sensitiveTesting.classifyTargetPath("C:\\Users\\me\\Documents\\PowerShell\\Microsoft.PowerShell_profile.ps1")).toBe("system_persistence");
+    expect(sensitiveTesting.classifyTargetPath("/repo/.env")).toBe("secret_store");
+  });
+
+  it("does not try to classify URLs as local target kinds", () => {
+    expect(sensitiveTesting.classifyTargetPath("https://api.github.com/graphql")).toBe("unknown");
+  });
+});
+
 describe("isHighRiskTool", () => {
   it("flags outbound HTTP tools", () => {
     expect(isHighRiskTool("http_post")).toBe(true);
@@ -193,6 +208,9 @@ describe("shell command helpers", () => {
     expect(extractTargetFromCommand("Get-Content C:\\repo\\.env")).toBe("C:\\repo\\.env");
     expect(extractTargetFromCommand("Get-Content -Path \"C:\\repo\\.env\"")).toBe("C:\\repo\\.env");
     expect(extractTargetFromCommand("curl https://example.com/docs")).toBe("https://example.com/docs");
+    expect(extractTargetFromCommand("New-Item -Path .\\.claude -Name settings.json -ItemType File")).toBe(".\\.claude\\settings.json");
+    expect(extractTargetFromCommand("echo note > .\\memory\\debugging.md")).toBe(".\\memory\\debugging.md");
+    expect(extractTargetFromCommand("tee .\\docs\\notes.md")).toBe(".\\docs\\notes.md");
   });
 
   it("distinguishes high-impact secrets from low-signal pii", () => {
@@ -233,6 +251,65 @@ describe("shell command helpers", () => {
     })).toMatchObject({
       isHighRisk: true,
       operationKind: "outbound_request",
+    });
+  });
+
+  it("treats read-only POST queries as benign external reads", () => {
+    expect(assessToolCall("http_request", {
+      method: "POST",
+      url: "https://api.github.com/graphql",
+      json: { query: "query { viewer { login } }", variables: { first: 5 } },
+    })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "external_read_query",
+    });
+    expect(assessToolCall("http_request", {
+      method: "POST",
+      url: "https://example.atlassian.net/rest/api/3/search/jql",
+      json: { jql: "project = DEMO", maxResults: 10, fields: ["summary"] },
+    })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "external_read_query",
+    });
+    expect(assessToolCall("http_request", {
+      method: "POST",
+      url: "https://vector.example.com/query",
+      json: { query: "pricing page", topK: 5, filters: { section: "docs" } },
+    })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "external_read_query",
+    });
+  });
+
+  it("reclassifies benign writes and risky write surfaces by target kind", () => {
+    expect(assessToolCall("write_file", { path: ".claude/CLAUDE.md" })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "memory_write",
+    });
+    expect(assessToolCall("write_file", { path: "package.json" })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "config_write",
+    });
+    expect(assessToolCall("write_file", { path: ".github/workflows/deploy.yml" })).toMatchObject({
+      isHighRisk: true,
+      operationKind: "execution_surface_write",
+      severity: "medium",
+    });
+    expect(assessToolCall("exec", { command: "Set-Content $PROFILE updated" })).toMatchObject({
+      isHighRisk: true,
+      operationKind: "system_persistence_write",
+      severity: "high",
+    });
+  });
+
+  it("treats local dev commands as normal activity", () => {
+    expect(assessToolCall("exec", { command: "npm run dev" })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "local_dev_runtime",
+    });
+    expect(assessToolCall("exec", { command: "docker compose logs web" })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "local_dev_runtime",
     });
   });
 
@@ -370,6 +447,15 @@ describe("shell command helpers", () => {
     expect(sensitiveTesting.requestPayloadLooksLikeSearch(undefined)).toBe(false);
     expect(sensitiveTesting.requestPayloadLooksLikeSearch({
       body: "q=latest+pricing",
+    })).toBe(true);
+    expect(sensitiveTesting.payloadLooksLikeReadQuery({
+      query: "query { viewer { login } }",
+      variables: { first: 5 },
+    })).toBe(true);
+    expect(sensitiveTesting.requestLooksLikeExternalReadQuery("http_request", {
+      method: "POST",
+      url: "https://api.github.com/graphql",
+      json: { query: "query { viewer { login } }" },
     })).toBe(true);
     expect(sensitiveTesting.requestLooksLikeWebSearch("google_lookup", undefined)).toBe(true);
   });
