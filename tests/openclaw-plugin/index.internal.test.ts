@@ -158,6 +158,7 @@ describe("index __testing helpers", () => {
       ]),
     );
     expect(event.data.target).toBe("/app/.env");
+    expect(event.data.target_kind).toBe("secret_store");
     expect(event.data.full_input).toBeDefined();
     expect(event.data.sensitive_patterns).toContain("api_key_sk");
   });
@@ -515,6 +516,49 @@ describe("index __testing helpers", () => {
     expect(true).toBe(true);
   });
 
+  it("normalizes hook payloads and builds fingerprints with default fallbacks", async () => {
+    const mod = await loadModule();
+
+    const normalized = mod.__testing.normalizeHookContext({
+      tool: { name: "browser_search" },
+      input: "latest pricing",
+      output: { ok: true },
+      message: { content: "done", channel: "telegram" },
+      session: { key: "fallback-session" },
+      agentId: "agent-x",
+    });
+    const defaultNormalized = mod.__testing.normalizeHookContext("not-an-object" as any);
+
+    expect(normalized).toEqual({
+      tool: "browser_search",
+      args: { raw: "latest pricing" },
+      result: { ok: true },
+      message: "done",
+      channel: "telegram",
+      sessionKey: "fallback-session",
+      agentId: "agent-x",
+    });
+    expect(defaultNormalized).toEqual({
+      tool: undefined,
+      args: undefined,
+      result: undefined,
+      message: undefined,
+      channel: "agent",
+      sessionKey: undefined,
+      agentId: undefined,
+    });
+    expect(mod.__testing.makeToolCallFingerprint({ tool: "browser_search" } as any))
+      .toContain("main|tool_call|browser_search");
+    expect(mod.__testing.makeToolCallFingerprint({} as any))
+      .toContain("main|tool_call|unknown|{}");
+    expect(mod.__testing.makeToolResultFingerprint("main", "browser_search", { ok: true }))
+      .toContain("main|tool_output|browser_search");
+    expect(mod.__testing.makeMessageFingerprint({ channel: "agent" } as any))
+      .toContain("main|action|agent|\"\"");
+    expect(mod.__testing.makeMessageFingerprint({} as any))
+      .toContain("main|action|agent|\"\"");
+  });
+
   it("ignores blank string config values so stale entries do not override safe defaults", async () => {
     const mod = await loadModule();
     process.env.CLAWGUARD_BACKEND_URL = "   ";
@@ -774,6 +818,38 @@ describe("index register edge cases", () => {
         }),
       ]),
     );
+  });
+
+  it("falls back to registerHook when api.on is unavailable and uses default main-session values", async () => {
+    const compatHandlers: Record<string, Function> = {};
+    const registerHook = vi.fn((name: string, handler: Function) => {
+      compatHandlers[name] = handler;
+    });
+
+    const { mod, api } = await registerWithRuntime({
+      on: undefined,
+      registerHook,
+    });
+
+    expect(api.registerHook).toHaveBeenCalled();
+    expect(Object.keys(compatHandlers)).toEqual(
+      expect.arrayContaining(["before_tool_call", "after_tool_call", "message_sent", "session_end"]),
+    );
+
+    mod.__testing.sessions.set("main", makeSession({ sessionId: "main-session" }));
+
+    compatHandlers.after_tool_call({
+      tool: "browser_search",
+      result: "ok",
+    });
+    compatHandlers.message_sent({
+      channel: "agent",
+    });
+    compatHandlers.session_end({});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mockFetch.mock.calls.some(([url]) => typeof url === "string" && url.endsWith("/v1/events"))).toBe(true);
+    expect(mockFetch.mock.calls.some(([url]) => typeof url === "string" && url.endsWith("/v1/sessions/end"))).toBe(true);
   });
 
   it("deduplicates identical tool calls that arrive through both runtime events and compatibility hooks", async () => {

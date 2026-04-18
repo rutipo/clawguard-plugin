@@ -535,9 +535,7 @@ async function handleToolCall(ctx: HookContext): Promise<void> {
 
   if (inferredTarget) {
     data.target = inferredTarget;
-    if (targetKind) {
-      data.target_kind = targetKind;
-    }
+    data.target_kind = targetKind;
   }
 
   if (sensitiveInput.length > 0) {
@@ -997,11 +995,15 @@ export const __testing = {
   SESSION_TTL_MS,
   sessions,
   stableSerialize,
+  normalizeHookContext,
   pruneRecentEventFingerprints,
   shouldCaptureEvent,
   captureMessage,
   resolveSession,
   makeEvent,
+  makeToolCallFingerprint,
+  makeToolResultFingerprint,
+  makeMessageFingerprint,
   truncate,
   handleToolCall,
   handleToolResult,

@@ -146,6 +146,17 @@ describe("classifyTargetPath", () => {
   it("does not try to classify URLs as local target kinds", () => {
     expect(sensitiveTesting.classifyTargetPath("https://api.github.com/graphql")).toBe("unknown");
   });
+
+  it("exposes communication helper decisions through testing exports", () => {
+    expect(sensitiveTesting.messageHasAttachment({ attachment: "/tmp/report.csv" })).toBe(true);
+    expect(sensitiveTesting.looksLikeExternalDestination({ target: "https://hooks.example.com/notify" })).toBe(true);
+    expect(sensitiveTesting.looksLikeTrustedChatDelivery({ attachment: "/tmp/report.csv" })).toBe(false);
+    expect(sensitiveTesting.looksLikeTrustedChatDelivery({ room_id: "team-room" })).toBe(true);
+    expect(sensitiveTesting.inferChannelType({ channel: "whatsapp" })).toBe("whatsapp");
+    expect(sensitiveTesting.inferChannelType({ channel: "slack" })).toBe("slack");
+    expect(sensitiveTesting.inferChannelType({ target: "alerts@email.example" })).toBe("email");
+    expect(sensitiveTesting.inferChannelType({ phone: "+1 (555) 123-4567" })).toBe("whatsapp");
+  });
 });
 
 describe("isHighRiskTool", () => {
@@ -209,10 +220,16 @@ describe("shell command helpers", () => {
   it("extracts targets from shell commands", () => {
     expect(extractTargetFromCommand("Get-Content C:\\repo\\.env")).toBe("C:\\repo\\.env");
     expect(extractTargetFromCommand("Get-Content -Path \"C:\\repo\\.env\"")).toBe("C:\\repo\\.env");
+    expect(extractTargetFromCommand("Get-Content 'README.md'")).toBe("README.md");
+    expect(extractTargetFromCommand("cat README.md")).toBe("README.md");
+    expect(extractTargetFromCommand("cat -Force")).toBe("");
     expect(extractTargetFromCommand("curl https://example.com/docs")).toBe("https://example.com/docs");
     expect(extractTargetFromCommand("New-Item -Path .\\.claude -Name settings.json -ItemType File")).toBe(".\\.claude\\settings.json");
     expect(extractTargetFromCommand("New-Item notes.md -ItemType File")).toBe("notes.md");
+    expect(extractTargetFromCommand("New-Item -ItemType File")).toBe("");
     expect(extractTargetFromCommand("echo note > .\\memory\\debugging.md")).toBe(".\\memory\\debugging.md");
+    expect(extractTargetFromCommand("out-file .\\docs\\notes.md")).toBe(".\\docs\\notes.md");
+    expect(extractTargetFromCommand("out-file -Encoding utf8")).toBe("");
     expect(extractTargetFromCommand("tee .\\docs\\notes.md")).toBe(".\\docs\\notes.md");
   });
 
@@ -220,6 +237,7 @@ describe("shell command helpers", () => {
     expect(sensitiveTesting.joinPathSegments("", "settings.json")).toBe("settings.json");
     expect(sensitiveTesting.joinPathSegments(".\\.claude", "")).toBe(".\\.claude");
     expect(sensitiveTesting.joinPathSegments(".\\.claude", "C:\\temp\\notes.md")).toBe("C:\\temp\\notes.md");
+    expect(sensitiveTesting.joinPathSegments("/repo/.claude", "settings.json")).toBe("/repo/.claude/settings.json");
   });
 
   it("distinguishes high-impact secrets from low-signal pii", () => {
@@ -248,6 +266,13 @@ describe("shell command helpers", () => {
     expect(assessToolCall("exec", { command: "git push origin main" })).toMatchObject({
       isHighRisk: false,
       canEgressData: true,
+      operationKind: "git_push",
+      toolCategory: "vcs",
+    });
+    expect(assessToolCall("exec", { command: "git commit -m \"Update docs\"" })).toMatchObject({
+      isHighRisk: false,
+      canEgressData: false,
+      operationKind: "git_workflow",
       toolCategory: "vcs",
     });
   });
@@ -470,6 +495,49 @@ describe("shell command helpers", () => {
     });
   });
 
+  it("covers direct chat-id trust hints and remaining communication fallbacks", () => {
+    expect(assessToolCall("send_message", {
+      room_id: "team-room",
+      message: "Sync complete",
+    })).toMatchObject({
+      isHighRisk: false,
+      operationKind: "trusted_delivery",
+      deliveryScope: "first_party",
+      channelType: "chat",
+    });
+    expect(assessToolCall("send_email", {
+      to: "ops@example.com",
+      subject: "Daily report",
+    })).toMatchObject({
+      isHighRisk: true,
+      operationKind: "send_email",
+      deliveryScope: "external",
+      channelType: "email",
+    });
+    expect(assessToolCall("send_message", {
+      channel: "telegram",
+      attachment: "/tmp/report.csv",
+      message: "Attached report",
+    })).toMatchObject({
+      isHighRisk: true,
+      operationKind: "send_message",
+      title: "Message send with attachment",
+      deliveryScope: "external",
+      channelType: "telegram",
+    });
+    expect(assessToolCall("send_message", {
+      destination: "queue-service",
+      message: "handoff ready",
+    })).toMatchObject({
+      isHighRisk: true,
+      operationKind: "send_message",
+      severity: "medium",
+      title: "Unclassified message send",
+      deliveryScope: "external",
+      channelType: "chat",
+    });
+  });
+
   it("covers remaining helper-tool fallbacks", () => {
     expect(assessToolCall("http_request", { method: "GET" })).toMatchObject({
       isHighRisk: false,
@@ -520,6 +588,24 @@ describe("shell command helpers", () => {
       method: "POST",
       url: "https://api.github.com/graphql",
       json: { query: "query { viewer { login } }" },
+    })).toBe(true);
+    expect(sensitiveTesting.requestLooksLikeWebSearch("http_request", {
+      method: "POST",
+      query: "latest docs",
+    })).toBe(true);
+    expect(sensitiveTesting.requestLooksLikeWebSearch("http_request", {
+      method: "POST",
+      query: "latest docs",
+      body: "q=latest+docs",
+    })).toBe(true);
+    expect(sensitiveTesting.requestLooksLikeExternalReadQuery("graphql_query", {
+      method: "POST",
+      query: "recent docs",
+    })).toBe(true);
+    expect(sensitiveTesting.requestLooksLikeExternalReadQuery("http_request", {
+      method: "POST",
+      query: "recent docs",
+      body: "{\"query\":\"query { viewer { login } }\"}",
     })).toBe(true);
     expect(sensitiveTesting.requestLooksLikeWebSearch("google_lookup", undefined)).toBe(true);
   });
