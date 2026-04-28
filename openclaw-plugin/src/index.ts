@@ -70,6 +70,15 @@ const INIT_KEY = Symbol.for("clawguard-monitor-initialized");
 const _global = globalThis as Record<symbol, unknown>;
 const recentEventFingerprints = new Map<string, number>();
 
+const INHERENTLY_ALERTABLE_OPERATION_KINDS = new Set([
+  "destructive_command",
+  "execution_surface_write",
+  "outbound_transfer",
+  "remote_code_execution",
+  "system_mutation",
+  "system_persistence_write",
+]);
+
 let client: ClawGuardClient;
 let pluginConfig: ClawGuardPluginConfig;
 let initialized: boolean = (_global[INIT_KEY] as boolean) ?? false;
@@ -434,6 +443,17 @@ function truncate(text: unknown, maxLen: number): string {
   return s.length > maxLen ? s.slice(0, maxLen) + "..." : s;
 }
 
+function shouldEmitHighRiskToolFlag(assessment: ReturnType<typeof assessToolCall>): boolean {
+  if (!assessment.isHighRisk) {
+    return false;
+  }
+
+  // OpenClaw agents use shell, HTTP, messaging, and file tools as normal
+  // mechanics. Alert only on actions that are dangerous by themselves; data
+  // egress is handled by the more specific potential_exfiltration signal.
+  return INHERENTLY_ALERTABLE_OPERATION_KINDS.has(assessment.operationKind);
+}
+
 /**
  * Handle a tool call event.
  * Captures tool call data, detects sensitive access, sends events to backend.
@@ -502,8 +522,10 @@ async function handleToolCall(ctx: HookContext): Promise<void> {
     session.sensitiveAccessed = true;
   }
 
-  // Check for high-risk tool
-  if (assessment.isHighRisk) {
+  // Check for intrinsically dangerous operations. Capability-only risk
+  // (for example a normal POST/search/message) stays in telemetry unless it
+  // combines with sensitive access below.
+  if (shouldEmitHighRiskToolFlag(assessment)) {
     riskFlags.push("high_risk_tool");
   }
 
