@@ -51,10 +51,17 @@ cd clawguard-plugin/openclaw-plugin
 npm ci
 npm run build
 npm pack
-openclaw plugins install ./clawguard-monitor-1.0.0.tgz --force
+openclaw plugins install ./clawguard-monitor-1.0.0.tgz
 ```
 
 On PowerShell, use the same final command with `.\clawguard-monitor-1.0.0.tgz`.
+
+If OpenClaw refuses to overwrite an existing install, uninstall the old plugin first and then install the new archive:
+
+```bash
+openclaw plugins uninstall clawguard-monitor
+openclaw plugins install ./clawguard-monitor-1.0.0.tgz
+```
 
 ClawGuard itself does not rewrite `~/.openclaw/openclaw.json` or try to repair plugin config. OpenClaw may still create or enable the plugin entry during installation, so verify the resulting config after install.
 

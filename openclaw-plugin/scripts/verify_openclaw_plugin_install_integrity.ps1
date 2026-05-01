@@ -50,7 +50,7 @@ if ($InstallArguments.Count -eq 0) {
             Write-Error "npm pack did not report a package filename."
         }
 
-        $InstallArguments = @("plugins", "install", (Join-Path $resolvedWorkingDirectory $packageFile), "--force")
+        $InstallArguments = @("plugins", "install", (Join-Path $resolvedWorkingDirectory $packageFile))
     }
     finally {
         Pop-Location
