@@ -540,6 +540,8 @@ describe("index __testing helpers", () => {
     const mod = await loadModule();
 
     expect(mod.__testing.stableSerialize(["beta", { alpha: 1 }])).toBe("[\"beta\",{\"alpha\":1}]");
+    expect(mod.__testing.formatErrorMessage("plain failure")).toBe("plain failure");
+    expect(mod.__testing.formatErrorMessage(new Error("error failure"))).toBe("error failure");
 
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1000);
     expect(mod.__testing.shouldCaptureEvent("stale")).toBe(true);
@@ -552,6 +554,44 @@ describe("index __testing helpers", () => {
 
     await mod.__testing.captureMessage({ sessionKey: "main" });
     expect(true).toBe(true);
+  });
+
+  it("suppresses repeated monitoring warnings and reports the suppressed count later", async () => {
+    const mod = await loadModule();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prefix = "[clawguard] monitoring error (agent unaffected):";
+    const err = new Error("backend 404");
+
+    mod.__testing.warnMonitoringError(prefix, err, 1000);
+    mod.__testing.warnMonitoringError(prefix, err, 1500);
+    mod.__testing.warnMonitoringError(prefix, err, 2000);
+    mod.__testing.warnMonitoringError(prefix, err, 1000 + mod.__testing.ERROR_WARNING_SUPPRESSION_MS + 1);
+
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenNthCalledWith(1, prefix, "backend 404");
+    expect(warnSpy).toHaveBeenNthCalledWith(
+      2,
+      prefix,
+      "backend 404 (suppressed 2 repeats in the last 60s)",
+    );
+    expect(mod.__testing.recentErrorWarnings.get(`${prefix}|backend 404`)).toMatchObject({
+      suppressedCount: 0,
+    });
+  });
+
+  it("uses singular wording when one monitoring warning was suppressed", async () => {
+    const mod = await loadModule();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const prefix = "[clawguard] message error (agent unaffected):";
+
+    mod.__testing.warnMonitoringError(prefix, new Error("temporary outage"), 1000);
+    mod.__testing.warnMonitoringError(prefix, new Error("temporary outage"), 1500);
+    mod.__testing.warnMonitoringError(prefix, new Error("temporary outage"), 1000 + mod.__testing.ERROR_WARNING_SUPPRESSION_MS + 1);
+
+    expect(warnSpy).toHaveBeenLastCalledWith(
+      prefix,
+      "temporary outage (suppressed 1 repeat in the last 60s)",
+    );
   });
 
   it("normalizes hook payloads and builds fingerprints with default fallbacks", async () => {

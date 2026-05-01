@@ -5,6 +5,7 @@
  * Uses native fetch() (Node 22+).
  */
 
+import { randomUUID } from "node:crypto";
 import type {
   AnalyzeThreadRequest,
   AnalyzeThreadResponse,
@@ -25,10 +26,31 @@ const TIMEOUT_RETRY_PATHS = new Set([
   "/v1/analyze-thread",
 ]);
 
+export class ClawGuardApiError extends Error {
+  readonly status: number;
+  readonly statusText: string;
+  readonly path: string;
+  readonly url: string;
+
+  constructor(path: string, url: string, status: number, statusText: string) {
+    const label = statusText ? `${status} ${statusText}` : String(status);
+    const hint = status === 404
+      ? " Check plugins.entries.clawguard-monitor.config.backendUrl; it should point to the ClawGuard server base URL, and the plugin adds /v1 paths automatically."
+      : "";
+    super(`ClawGuard API error on ${path} (${url}): ${label}.${hint}`);
+    this.name = "ClawGuardApiError";
+    this.status = status;
+    this.statusText = statusText;
+    this.path = path;
+    this.url = url;
+  }
+}
+
 export class ClawGuardClient {
   private config: ClawGuardPluginConfig;
   private eventBuffer: EventPayload[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private warningsShown = new Set<string>();
 
   constructor(config: ClawGuardPluginConfig) {
     const normalizedBackendUrl = this.normalizeBackendUrl(config.backendUrl);
@@ -40,7 +62,18 @@ export class ClawGuardClient {
   }
 
   private normalizeBackendUrl(url: string): string {
-    return url.replace(/\/+$/, "");
+    const withoutQueryOrHash = url.trim().replace(/[?#].*$/, "");
+    const withoutTrailingSlash = withoutQueryOrHash.replace(/\/+$/, "");
+    return withoutTrailingSlash.replace(/\/v1$/i, "");
+  }
+
+  private warnOnce(key: string, message: string): void {
+    if (this.warningsShown.has(key)) {
+      return;
+    }
+
+    this.warningsShown.add(key);
+    console.warn(message);
   }
 
   /**
@@ -107,8 +140,20 @@ export class ClawGuardClient {
   /** Create a session on the backend. */
   async startSession(agentId: string, task: string): Promise<string> {
     const body: SessionStartRequest = { agent_id: agentId, task };
-    const res = await this.post<SessionStartResponse>("/v1/sessions/start", body);
-    return res.session_id;
+    try {
+      const res = await this.post<SessionStartResponse>("/v1/sessions/start", body);
+      return res.session_id;
+    } catch (err) {
+      if (err instanceof ClawGuardApiError && err.status === 404) {
+        this.warnOnce(
+          "session-start-404",
+          "[clawguard] /v1/sessions/start returned 404; using client-generated session IDs. Update the ClawGuard backend when possible.",
+        );
+        return randomUUID();
+      }
+
+      throw err;
+    }
   }
 
   /** End a session on the backend. */
@@ -187,9 +232,7 @@ export class ClawGuardClient {
             );
           }
           // Don't include response body — it may contain sensitive data or be attacker-controlled
-          throw new Error(
-            `ClawGuard API error on ${path}: ${response.status} ${response.statusText}`,
-          );
+          throw new ClawGuardApiError(path, url, response.status, response.statusText);
         }
 
         return response.json() as Promise<T>;

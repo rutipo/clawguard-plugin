@@ -62,6 +62,7 @@ const sessions = new Map<string, ActiveSession>();
 const MAX_SESSIONS = 100;
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
 const RECENT_EVENT_TTL_MS = 750;
+const ERROR_WARNING_SUPPRESSION_MS = 60 * 1000;
 
 // Use Symbol.for() only for the boolean init guard (no sensitive data).
 // Client and config are module-scoped only — not stored on globalThis —
@@ -69,6 +70,7 @@ const RECENT_EVENT_TTL_MS = 750;
 const INIT_KEY = Symbol.for("clawguard-monitor-initialized");
 const _global = globalThis as Record<symbol, unknown>;
 const recentEventFingerprints = new Map<string, number>();
+const recentErrorWarnings = new Map<string, { lastSeenAt: number; suppressedCount: number }>();
 
 const INHERENTLY_ALERTABLE_OPERATION_KINDS = new Set([
   "destructive_command",
@@ -82,6 +84,28 @@ const INHERENTLY_ALERTABLE_OPERATION_KINDS = new Set([
 let client: ClawGuardClient;
 let pluginConfig: ClawGuardPluginConfig;
 let initialized: boolean = (_global[INIT_KEY] as boolean) ?? false;
+
+function formatErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function warnMonitoringError(prefix: string, err: unknown, now = Date.now()): void {
+  const message = formatErrorMessage(err);
+  const key = `${prefix}|${message}`;
+  const previous = recentErrorWarnings.get(key);
+
+  if (previous && now - previous.lastSeenAt < ERROR_WARNING_SUPPRESSION_MS) {
+    previous.suppressedCount++;
+    return;
+  }
+
+  const suppressedSuffix = previous && previous.suppressedCount > 0
+    ? ` (suppressed ${previous.suppressedCount} repeat${previous.suppressedCount === 1 ? "" : "s"} in the last ${ERROR_WARNING_SUPPRESSION_MS / 1000}s)`
+    : "";
+
+  console.warn(prefix, `${message}${suppressedSuffix}`);
+  recentErrorWarnings.set(key, { lastSeenAt: now, suppressedCount: 0 });
+}
 
 function readOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") {
@@ -630,7 +654,7 @@ function handleToolResult(
 
   if (riskFlags.length > 0) {
     client.sendEventImmediate(event).catch((err) => {
-      console.warn("[clawguard] send error (agent unaffected):", err.message);
+      warnMonitoringError("[clawguard] send error (agent unaffected):", err);
     });
   } else {
     client.queueEvent(event);
@@ -705,7 +729,7 @@ async function endSessionForKey(
   try {
     await client.endSession(session.sessionId, status);
   } catch (err) {
-    console.warn("[clawguard] end session error (agent unaffected):", (err as Error).message);
+    warnMonitoringError("[clawguard] end session error (agent unaffected):", err);
   }
 
   sessions.delete(key);
@@ -723,6 +747,7 @@ function loadConfig(api: OpenClawPluginApi): ClawGuardPluginConfig {
 function resetStateForTests(): void {
   sessions.clear();
   recentEventFingerprints.clear();
+  recentErrorWarnings.clear();
   initialized = false;
   _global[INIT_KEY] = false;
 }
@@ -848,7 +873,7 @@ export default definePluginEntry({
             };
             captureToolCall(ctx).catch(err => {
               // Log as warning — monitoring errors should not disrupt the agent
-              console.warn("[clawguard] monitoring error (agent unaffected):", (err as Error).message);
+              warnMonitoringError("[clawguard] monitoring error (agent unaffected):", err);
             });
           }
 
@@ -870,7 +895,7 @@ export default definePluginEntry({
                 agentId: pluginConfig.agentId,
               };
               captureMessage(ctx).catch(err => {
-                console.warn("[clawguard] message error (agent unaffected):", (err as Error).message);
+                warnMonitoringError("[clawguard] message error (agent unaffected):", err);
               });
             }
           }
@@ -924,7 +949,7 @@ export default definePluginEntry({
 
         if (/start|begin|invoke|call/i.test(dataType) || /start/i.test(stream)) {
           captureToolCall(ctx).catch(err => {
-            console.warn("[clawguard] agent event error (agent unaffected):", (err as Error).message);
+            warnMonitoringError("[clawguard] agent event error (agent unaffected):", err);
           });
         } else if (/end|complete|result|done/i.test(dataType) || /end|result/i.test(stream)) {
           captureToolResult(ctx);
@@ -939,7 +964,7 @@ export default definePluginEntry({
     if (registerCompatHook) {
       registerCompatHook("before_tool_call", async (ctx: HookContext) => {
         await captureToolCall(ctx).catch((err) => {
-          console.warn("[clawguard] hook monitoring error (agent unaffected):", (err as Error).message);
+          warnMonitoringError("[clawguard] hook monitoring error (agent unaffected):", err);
         });
       });
 
@@ -947,20 +972,20 @@ export default definePluginEntry({
         try {
           captureToolResult(ctx);
         } catch (err) {
-          console.warn("[clawguard] hook result error (agent unaffected):", (err as Error).message);
+          warnMonitoringError("[clawguard] hook result error (agent unaffected):", err);
         }
       });
 
       registerCompatHook("message_sent", async (ctx: HookContext) => {
         await captureMessage(ctx).catch((err) => {
-          console.warn("[clawguard] hook message error (agent unaffected):", (err as Error).message);
+          warnMonitoringError("[clawguard] hook message error (agent unaffected):", err);
         });
       });
 
       registerCompatHook("session_end", async (ctx: HookContext) => {
         const normalized = normalizeHookContext(ctx);
         await endSessionForKey(normalized.sessionKey || "main").catch((err) => {
-          console.warn("[clawguard] hook session end error (agent unaffected):", (err as Error).message);
+          warnMonitoringError("[clawguard] hook session end error (agent unaffected):", err);
         });
       });
     }
@@ -996,8 +1021,12 @@ export default definePluginEntry({
 export const __testing = {
   MAX_SESSIONS,
   SESSION_TTL_MS,
+  ERROR_WARNING_SUPPRESSION_MS,
   sessions,
+  recentErrorWarnings,
   stableSerialize,
+  formatErrorMessage,
+  warnMonitoringError,
   normalizeHookContext,
   pruneRecentEventFingerprints,
   shouldCaptureEvent,
@@ -1017,7 +1046,7 @@ export const __testing = {
   resetStateForTests,
   setStateForTests,
 };
-export { ClawGuardClient } from "./client.js";
+export { ClawGuardApiError, ClawGuardClient } from "./client.js";
 export { detectSensitiveContent, isHighRiskTool, isSensitivePath } from "./sensitive.js";
 export type { AnalyzeThreadRequest, AnalyzeThreadResponse, ClawGuardPluginConfig, EventPayload } from "./types.js";
 export { DEFAULT_CONFIG } from "./types.js";

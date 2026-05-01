@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ClawGuardClient } from "../../openclaw-plugin/src/client.js";
+import { ClawGuardApiError, ClawGuardClient } from "../../openclaw-plugin/src/client.js";
 import type { ClawGuardPluginConfig, EventPayload } from "../../openclaw-plugin/src/types.js";
 import { DEFAULT_CONFIG } from "../../openclaw-plugin/src/types.js";
 
@@ -81,6 +81,17 @@ describe("ClawGuardClient", () => {
 
     it("normalizes trailing slashes in backend URLs before making requests", async () => {
       client = new ClawGuardClient(makeConfig({ backendUrl: "http://localhost:8000///" }));
+
+      await client.sendEventImmediate(makeEvent());
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        "http://localhost:8000/v1/events",
+        expect.anything(),
+      );
+    });
+
+    it("normalizes an accidental /v1 suffix in backend URLs", async () => {
+      client = new ClawGuardClient(makeConfig({ backendUrl: "http://localhost:8000/v1/" }));
 
       await client.sendEventImmediate(makeEvent());
 
@@ -257,8 +268,56 @@ describe("ClawGuardClient", () => {
       await expect(
         client.sendEventImmediate(makeEvent()),
       ).rejects.toThrow(
-        "ClawGuard API error on /v1/events: 503 Service Unavailable",
+        "ClawGuard API error on /v1/events (http://localhost:8000/v1/events): 503 Service Unavailable.",
       );
+    });
+
+    it("includes a backendUrl hint and structured fields for 404 API errors", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        text: () => Promise.resolve("not found body"),
+      });
+
+      const error = await client.sendEventImmediate(makeEvent()).catch((err: Error) => err);
+
+      expect(error).toBeInstanceOf(ClawGuardApiError);
+      expect(String(error)).toContain("ClawGuard API error on /v1/events (http://localhost:8000/v1/events): 404 Not Found.");
+      expect(String(error)).toContain("backendUrl");
+      expect((error as ClawGuardApiError).status).toBe(404);
+      expect((error as ClawGuardApiError).path).toBe("/v1/events");
+      expect(String(error)).not.toContain("not found body");
+    });
+
+    it("formats API errors without a status text", () => {
+      const error = new ClawGuardApiError("/v1/events", "http://localhost:8000/v1/events", 500, "");
+
+      expect(error.message).toBe(
+        "ClawGuard API error on /v1/events (http://localhost:8000/v1/events): 500.",
+      );
+    });
+
+    it("falls back to client-generated session IDs when the backend lacks /v1/sessions/start", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockFetch.mockResolvedValue({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        json: () => Promise.resolve({}),
+      });
+
+      const firstSessionId = await client.startSession("my-agent", "research task");
+      const secondSessionId = await client.startSession("my-agent", "research task");
+
+      expect(firstSessionId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(secondSessionId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(firstSessionId).not.toBe(secondSessionId);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("using client-generated session IDs"),
+      );
+      warnSpy.mockRestore();
     });
 
     it("retries timeout once for de-duplicated event endpoints", async () => {
