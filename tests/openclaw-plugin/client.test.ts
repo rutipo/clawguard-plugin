@@ -242,7 +242,7 @@ describe("ClawGuardClient", () => {
       await expect(
         client.sendEventImmediate(makeEvent()),
       ).rejects.toThrow(
-        "ClawGuard API authentication failed on /v1/events: 401 Unauthorized. Verify the API key configured on this machine",
+        "ClawGuard API authentication failed on /v1/events: 401 Unauthorized. Verify the API key in plugins.entries.clawguard-monitor.config.apiKey.",
       );
     });
 

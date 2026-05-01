@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock fetch before imports
 const mockFetch = vi.fn();
@@ -22,10 +22,6 @@ describe("register()", () => {
   it("warns and returns when no API key configured", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // Clear env vars
-    delete process.env.CLAWGUARD_API_KEY;
-    delete process.env.CLAWGUARD_BACKEND_URL;
-
     const mod = await import("../../openclaw-plugin/src/index.js");
 
     const api = {
@@ -46,9 +42,6 @@ describe("register()", () => {
   it("disables monitoring instead of throwing on invalid startup config", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-    delete process.env.CLAWGUARD_BACKEND_URL;
-    delete process.env.CLAWGUARD_AGENT_ID;
 
     const mod = await import("../../openclaw-plugin/src/index.js");
 
@@ -85,11 +78,6 @@ describe("event-based monitoring (with API key)", () => {
   let agentEventCallback: Function;
 
   beforeEach(async () => {
-    process.env.CLAWGUARD_API_KEY = "test-key-123";
-    process.env.CLAWGUARD_BACKEND_URL = "http://localhost:8000";
-    process.env.CLAWGUARD_AGENT_ID = "test-bot";
-
-    // Dynamic import to pick up env changes
     vi.resetModules();
     const mod = await import("../../openclaw-plugin/src/index.js");
 
@@ -97,6 +85,8 @@ describe("event-based monitoring (with API key)", () => {
       registerHook: vi.fn(),
       on: vi.fn(),
       pluginConfig: {
+        apiKey: "test-key-123",
+        backendUrl: "http://localhost:8000",
         agentId: "test-bot",
       },
       runtime: {
@@ -112,12 +102,6 @@ describe("event-based monitoring (with API key)", () => {
     };
 
     mod.default.register(api as any);
-  });
-
-  afterEach(async () => {
-    delete process.env.CLAWGUARD_API_KEY;
-    delete process.env.CLAWGUARD_BACKEND_URL;
-    delete process.env.CLAWGUARD_AGENT_ID;
   });
 
   it("subscribes to onSessionTranscriptUpdate and onAgentEvent", () => {

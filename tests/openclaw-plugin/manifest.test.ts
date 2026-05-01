@@ -9,6 +9,8 @@ const manifest = JSON.parse(readFileSync(resolve(pluginRoot, "openclaw.plugin.js
 describe("package metadata", () => {
   it("ships the OpenClaw manifest and has no install-time scripts", () => {
     expect(packageJson.files).toContain("openclaw.plugin.json");
+    expect(packageJson.files).toContain("dist/");
+    expect(packageJson.files).not.toContain("src/");
     expect(packageJson.scripts).not.toHaveProperty("preinstall");
     expect(packageJson.scripts).not.toHaveProperty("install");
     expect(packageJson.scripts).not.toHaveProperty("postinstall");
@@ -45,5 +47,15 @@ describe("package metadata", () => {
       expect(value).not.toHaveProperty("format");
       expect(value).not.toHaveProperty("enum");
     }
+  });
+
+  it("does not read environment variables from runtime source", () => {
+    const runtimeSource = [
+      readFileSync(resolve(pluginRoot, "src/index.ts"), "utf8"),
+      readFileSync(resolve(pluginRoot, "src/client.ts"), "utf8"),
+    ].join("\n");
+
+    expect(runtimeSource).not.toMatch(/process\.env/);
+    expect(runtimeSource).not.toMatch(/CLAWGUARD_(BACKEND_URL|API_KEY|AGENT_ID)/);
   });
 });

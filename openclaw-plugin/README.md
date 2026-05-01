@@ -43,33 +43,28 @@ openclaw plugins install clawhub:clawguard-monitor
 
 ### From a local source checkout (unpublished/local testing only)
 
+Do not install this plugin by linking the raw source directory with `-l .`. Use a packed build artifact so OpenClaw installs the same files that will be published and does not scan development-only source.
+
 ```bash
 git clone https://github.com/rutipo/clawguard-plugin.git
 cd clawguard-plugin/openclaw-plugin
-openclaw plugins install -l .
+npm ci
+npm run build
+npm pack
+openclaw plugins install ./clawguard-monitor-1.0.0.tgz --force
 ```
 
-Because `dist/` is checked in, you do not need `npm install` for a user-style local install. Run `npm ci && npm run build` only if you are actively changing the TypeScript source and need to rebuild it.
+On PowerShell, use the same final command with `.\clawguard-monitor-1.0.0.tgz`.
 
 ClawGuard itself does not rewrite `~/.openclaw/openclaw.json` or try to repair plugin config. OpenClaw may still create or enable the plugin entry during installation, so verify the resulting config after install.
 
 ## Configuration
 
-Choose one of the following configuration sources. None of them should be written automatically during installation.
+Configure ClawGuard through OpenClaw plugin config. Runtime environment variables are intentionally not supported because current OpenClaw installers flag plugins that combine environment-variable access with outbound network sends.
 
 If the config is missing, blank, or malformed, ClawGuard stays inactive and logs a warning. It does not rewrite OpenClaw config, self-enable, or try to repair stale entries.
 
-**Option A: Environment variables**
-
-```bash
-export CLAWGUARD_BACKEND_URL=https://your-clawguard-server.com
-export CLAWGUARD_API_KEY=cg_your_api_key_here
-export CLAWGUARD_AGENT_ID=my-research-bot
-```
-
-If OpenClaw is launched from a service manager, put the same variables in that service's environment file instead of rewriting plugin config during install.
-
-**Option B: Explicit OpenClaw config commands**
+**Option A: Explicit OpenClaw config commands**
 
 ```bash
 openclaw config set plugins.entries.clawguard-monitor.config.backendUrl "https://your-clawguard-server.com"
@@ -77,7 +72,7 @@ openclaw config set plugins.entries.clawguard-monitor.config.apiKey "cg_your_api
 openclaw config set plugins.entries.clawguard-monitor.config.agentId "my-research-bot"
 ```
 
-**Option C: Edit config file**
+**Option B: Edit config file**
 
 Add to your OpenClaw config (`~/.openclaw/openclaw.json` or equivalent):
 
@@ -122,21 +117,21 @@ openclaw config set plugins.entries.clawguard-monitor.enabled false
 openclaw gateway restart
 ```
 
-To rotate the API key later, update the environment variable or rerun the explicit `openclaw config set ...apiKey` command. Reinstalling the plugin should never be required just to change secrets.
+To rotate the API key later, rerun the explicit `openclaw config set ...apiKey` command. Reinstalling the plugin should never be required just to change secrets.
 
 ### Configuration options
 
-| Option | Env var | Default | Description |
-|--------|---------|---------|-------------|
-| `backendUrl` | `CLAWGUARD_BACKEND_URL` | `http://localhost:8000` | ClawGuard backend URL |
-| `apiKey` | `CLAWGUARD_API_KEY` | (required to monitor) | API key from `/v1/register` |
-| `agentId` | `CLAWGUARD_AGENT_ID` | `openclaw-agent` | Identifier for this agent |
-| `captureFullIo` | - | `false` | Capture full tool input/output (up to 50KB) |
-| `maxFullIoBytes` | - | `50000` | Maximum full I/O bytes when `captureFullIo` is enabled |
-| `blockSensitiveAccess` | - | `false` | Block tool calls to sensitive files |
-| `requireApprovalForHighRisk` | - | `false` | Require user approval for potential exfiltration |
-| `batchSize` | - | `10` | Events buffered before sending |
-| `flushIntervalMs` | - | `5000` | Max time before flushing event buffer |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `backendUrl` | `http://localhost:8000` | ClawGuard backend URL |
+| `apiKey` | (required to monitor) | API key from `/v1/register` |
+| `agentId` | `openclaw-agent` | Identifier for this agent |
+| `captureFullIo` | `false` | Capture full tool input/output (up to 50KB) |
+| `maxFullIoBytes` | `50000` | Maximum full I/O bytes when `captureFullIo` is enabled |
+| `blockSensitiveAccess` | `false` | Block tool calls to sensitive files |
+| `requireApprovalForHighRisk` | `false` | Require user approval for potential exfiltration |
+| `batchSize` | `10` | Events buffered before sending |
+| `flushIntervalMs` | `5000` | Max time before flushing event buffer |
 
 ## Install integrity check
 
@@ -146,7 +141,7 @@ On machines that have OpenClaw installed, you can verify that plugin installatio
 powershell -ExecutionPolicy Bypass -File .\scripts\verify_openclaw_plugin_install_integrity.ps1
 ```
 
-That script hashes `~/.openclaw/openclaw.json` before and after `openclaw plugins install -l .` and exits non-zero if the hash changes without an explicit config command.
+That script hashes `~/.openclaw/openclaw.json`, builds a packed plugin archive, installs that archive, and exits non-zero if the hash changes without an explicit config command.
 
 ## Thread Analysis API
 
@@ -174,7 +169,7 @@ This plugin:
 - **Network**: Makes outbound HTTPS requests only to the configured `backendUrl`. No other network access.
 - **Filesystem**: Does not read or write any files.
 - **Shell**: Does not execute shell commands.
-- **Secrets**: API key is read from environment variables or plugin config. Never logged or included in error messages.
+- **Secrets**: API key is read only from OpenClaw plugin config. Never logged or included in error messages.
 - **Data sent**: Tool names, input summaries (truncated to 200 chars), output summaries (300 chars), risk flags, timestamps. Full I/O capture is opt-in via `captureFullIo`.
 - **Trust model**: The plugin runs in the OpenClaw process and trusts the OpenClaw plugin sandbox. Other plugins in the same process share the same runtime.
 - **URL validation**: Backend URL is validated on startup — private IPs and cloud metadata endpoints are blocked to prevent SSRF.

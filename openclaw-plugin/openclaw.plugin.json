@@ -8,13 +8,13 @@
     "additionalProperties": true,
     "properties": {
       "backendUrl": {
-        "description": "ClawGuard backend URL. Optional if CLAWGUARD_BACKEND_URL is set."
+        "description": "ClawGuard backend URL configured through OpenClaw plugin config."
       },
       "apiKey": {
-        "description": "ClawGuard API key. Optional if CLAWGUARD_API_KEY is set."
+        "description": "ClawGuard API key configured through OpenClaw plugin config."
       },
       "agentId": {
-        "description": "Identifier for this agent. Optional if CLAWGUARD_AGENT_ID is set."
+        "description": "Identifier for this agent."
       },
       "captureFullIo": {
         "description": "Capture full tool input/output instead of summaries."

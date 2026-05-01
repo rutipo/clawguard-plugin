@@ -53,16 +53,10 @@ beforeEach(() => {
     json: () => Promise.resolve({ status: "ok", session_id: "generated-session" }),
     text: () => Promise.resolve(""),
   });
-  delete process.env.CLAWGUARD_API_KEY;
-  delete process.env.CLAWGUARD_BACKEND_URL;
-  delete process.env.CLAWGUARD_AGENT_ID;
   (globalThis as Record<symbol, unknown>)[Symbol.for("clawguard-monitor-initialized")] = false;
 });
 
 afterEach(() => {
-  delete process.env.CLAWGUARD_API_KEY;
-  delete process.env.CLAWGUARD_BACKEND_URL;
-  delete process.env.CLAWGUARD_AGENT_ID;
   vi.restoreAllMocks();
 });
 
@@ -429,11 +423,8 @@ describe("index __testing helpers", () => {
     );
   });
 
-  it("loadConfig merges plugin config with environment overrides", async () => {
+  it("loadConfig accepts explicit plugin runtime config", async () => {
     const mod = await loadModule();
-    process.env.CLAWGUARD_BACKEND_URL = "https://env.example.com";
-    process.env.CLAWGUARD_API_KEY = "env-key";
-    process.env.CLAWGUARD_AGENT_ID = "env-agent";
 
     const config = mod.__testing.loadConfig({
       pluginConfig: {
@@ -449,9 +440,9 @@ describe("index __testing helpers", () => {
       },
     } as any);
 
-    expect(config.backendUrl).toBe("https://env.example.com");
-    expect(config.apiKey).toBe("env-key");
-    expect(config.agentId).toBe("env-agent");
+    expect(config.backendUrl).toBe("https://config.example.com");
+    expect(config.apiKey).toBe("config-key");
+    expect(config.agentId).toBe("config-agent");
     expect(config.captureFullIo).toBe(true);
     expect(config.maxFullIoBytes).toBe(1234);
     expect(config.blockSensitiveAccess).toBe(true);
@@ -487,19 +478,29 @@ describe("index __testing helpers", () => {
     expect(resolved.sources.apiKey).toBe("openclaw config");
   });
 
-  it("records a warning when CLAWGUARD_API_KEY overrides plugin config", async () => {
+  it("records a warning when plugin runtime config overrides OpenClaw config", async () => {
     const mod = await loadModule();
-    process.env.CLAWGUARD_API_KEY = "env-key";
 
     const resolved = mod.__testing.resolveConfig({
+      config: {
+        plugins: {
+          entries: {
+            "clawguard-monitor": {
+              config: {
+                apiKey: "config-key",
+              },
+            },
+          },
+        },
+      },
       pluginConfig: {
         apiKey: "plugin-key",
       },
     } as any);
 
-    expect(resolved.config.apiKey).toBe("env-key");
+    expect(resolved.config.apiKey).toBe("plugin-key");
     expect(resolved.warnings).toContain(
-      "[clawguard] CLAWGUARD_API_KEY is overriding the plugin runtime API key. If requests return 401, update or clear that environment variable on this machine.",
+      "[clawguard] plugin runtime API key overrides the openclaw config API key.",
     );
   });
 
@@ -598,9 +599,6 @@ describe("index __testing helpers", () => {
 
   it("ignores blank string config values so stale entries do not override safe defaults", async () => {
     const mod = await loadModule();
-    process.env.CLAWGUARD_BACKEND_URL = "   ";
-    process.env.CLAWGUARD_API_KEY = " ";
-    process.env.CLAWGUARD_AGENT_ID = "\t";
 
     const config = mod.__testing.loadConfig({
       pluginConfig: {
@@ -782,7 +780,6 @@ describe("index register edge cases", () => {
 
   it("logs resolved config warnings during registration", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    process.env.CLAWGUARD_API_KEY = "env-key";
 
     await registerWithRuntime({
       pluginConfig: { apiKey: "plugin-key", agentId: "plugin-agent", backendUrl: "http://localhost:8000" },
@@ -801,7 +798,7 @@ describe("index register edge cases", () => {
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("CLAWGUARD_API_KEY is overriding"),
+      expect.stringContaining("plugin runtime API key overrides"),
     );
   });
 

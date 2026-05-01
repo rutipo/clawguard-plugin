@@ -13,7 +13,7 @@
  * Installation:
  *   openclaw plugins install clawhub:clawguard-monitor
  *
- * Configuration (openclaw config):
+ * Configuration (OpenClaw plugin config):
  *   plugins:
  *     entries:
  *       clawguard-monitor:
@@ -111,7 +111,7 @@ function getConfiguredPluginEntry(api: OpenClawPluginApi): Record<string, unknow
     ?? readObject(plugins?.["@clawguard/openclaw-plugin"]);
 }
 
-type ConfigSource = "default" | "openclaw config" | "plugin runtime" | "environment";
+type ConfigSource = "default" | "openclaw config" | "plugin runtime";
 
 interface LoadedConfigResult {
   config: ClawGuardPluginConfig;
@@ -122,12 +122,6 @@ interface LoadedConfigResult {
   };
   warnings: string[];
 }
-
-const CONFIG_ENV_VARS = {
-  backendUrl: "CLAWGUARD_BACKEND_URL",
-  apiKey: "CLAWGUARD_API_KEY",
-  agentId: "CLAWGUARD_AGENT_ID",
-} as const;
 
 const CONFIG_LABELS = {
   backendUrl: "backend URL",
@@ -141,15 +135,6 @@ function makeConfigOverrideWarning(
   previousSource: ConfigSource,
 ): string {
   const label = CONFIG_LABELS[field];
-
-  if (source === "environment") {
-    const envVar = CONFIG_ENV_VARS[field];
-    const hint = field === "apiKey"
-      ? " If requests return 401, update or clear that environment variable on this machine."
-      : "";
-    return `[clawguard] ${envVar} is overriding the ${previousSource} ${label}.${hint}`;
-  }
-
   return `[clawguard] ${source} ${label} overrides the ${previousSource} ${label}.`;
 }
 
@@ -216,10 +201,6 @@ function resolveConfig(api: OpenClawPluginApi): LoadedConfigResult {
     applyConfiguredString(config, sources, warnings, "agentId", runtimePluginConfig.agentId, "plugin runtime");
     applyNonStringConfig(config, runtimePluginConfig);
   }
-
-  applyConfiguredString(config, sources, warnings, "backendUrl", process.env.CLAWGUARD_BACKEND_URL, "environment");
-  applyConfiguredString(config, sources, warnings, "apiKey", process.env.CLAWGUARD_API_KEY, "environment");
-  applyConfiguredString(config, sources, warnings, "agentId", process.env.CLAWGUARD_AGENT_ID, "environment");
 
   return { config, sources, warnings };
 }
@@ -733,7 +714,7 @@ async function endSessionForKey(
 // --- Plugin entry point ---
 
 /**
- * Load plugin configuration from OpenClaw config or environment.
+ * Load plugin configuration from OpenClaw's explicit plugin config surfaces.
  */
 function loadConfig(api: OpenClawPluginApi): ClawGuardPluginConfig {
   return resolveConfig(api).config;

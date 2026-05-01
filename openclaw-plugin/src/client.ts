@@ -183,7 +183,7 @@ export class ClawGuardClient {
         if (!response.ok) {
           if (response.status === 401) {
             throw new Error(
-              `ClawGuard API authentication failed on ${path}: ${response.status} ${response.statusText}. Verify the API key configured on this machine and check whether a stale CLAWGUARD_API_KEY environment variable is overriding the plugin config.`,
+              `ClawGuard API authentication failed on ${path}: ${response.status} ${response.statusText}. Verify the API key in plugins.entries.clawguard-monitor.config.apiKey.`,
             );
           }
           // Don't include response body — it may contain sensitive data or be attacker-controlled

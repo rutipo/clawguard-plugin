@@ -2,7 +2,7 @@
 
 > **This is the public distribution repo.** It contains the OpenClaw plugin that users install on their machines to connect to the ClawGuard monitoring service. The backend, analysis engine, and Telegram bot are in the private [`rutipo/ClawGuard`](https://github.com/rutipo/ClawGuard) repository and are never distributed to users.
 
-Security monitoring plugin for [OpenClaw](https://github.com/openclaw/openclaw) agents. Hooks into the tool execution lifecycle to capture every tool call, detect sensitive content, and stream events to the ClawGuard backend for real-time Telegram alerts and analysis.
+Security monitoring plugin for [OpenClaw](https://github.com/openclaw/openclaw) agents. Subscribes to OpenClaw runtime event streams, uses hooks as a compatibility fallback, detects sensitive content, and streams events to the ClawGuard backend for real-time Telegram alerts and analysis.
 
 ## How It Works
 
@@ -18,7 +18,7 @@ OpenClaw Agent                     ClawGuard Backend
                                   +---------------------------+
 ```
 
-The plugin intercepts every tool call and outbound message via OpenClaw's `before_tool_call` and `message_sending` hooks. Events are streamed to the ClawGuard backend for risk analysis and Telegram commentary.
+The plugin observes tool calls and agent messages through OpenClaw runtime events, with compatibility hooks where available. Events are streamed to the ClawGuard backend for risk analysis and Telegram commentary.
 
 ## Installation
 
@@ -31,10 +31,13 @@ Or install from source:
 ```bash
 git clone https://github.com/rutipo/clawguard-plugin.git
 cd clawguard-plugin/openclaw-plugin
-npm install && npm run build
+npm ci
+npm run build
+npm pack
+openclaw plugins install ./clawguard-monitor-1.0.0.tgz --force
 ```
 
-Then add the plugin to your OpenClaw config with a local `path` pointing to the `openclaw-plugin` directory (see Configuration below).
+On PowerShell, use `.\clawguard-monitor-1.0.0.tgz` in the final command. Do not link the raw source directory with `-l .`; current OpenClaw installers scan source trees more aggressively than packed plugin artifacts.
 
 ## Configuration
 
@@ -68,26 +71,20 @@ Add to your OpenClaw config (`~/.openclaw/openclaw.json` or equivalent):
 }
 ```
 
-**Option C: Environment variables**
-
-```bash
-export CLAWGUARD_BACKEND_URL=https://your-clawguard-server.com
-export CLAWGUARD_API_KEY=cg_your_api_key_here
-export CLAWGUARD_AGENT_ID=my-research-bot
-```
+Runtime environment variables are intentionally not supported by the plugin because current OpenClaw installers flag plugins that combine environment-variable access with outbound network sends.
 
 ### Configuration options
 
-| Option | Env var | Default | Description |
-|---|---|---|---|
-| `backendUrl` | `CLAWGUARD_BACKEND_URL` | `http://localhost:8000` | ClawGuard backend URL |
-| `apiKey` | `CLAWGUARD_API_KEY` | (required) | API key from registration |
-| `agentId` | `CLAWGUARD_AGENT_ID` | `openclaw-agent` | Identifier for this agent |
-| `captureFullIo` | - | `false` | Capture full tool input/output (up to 50KB) |
-| `blockSensitiveAccess` | - | `false` | Block tool calls to sensitive files |
-| `requireApprovalForHighRisk` | - | `false` | Require user approval for potential exfiltration |
-| `batchSize` | - | `10` | Events buffered before sending |
-| `flushIntervalMs` | - | `5000` | Max time before flushing event buffer |
+| Option | Default | Description |
+|---|---|---|
+| `backendUrl` | `http://localhost:8000` | ClawGuard backend URL |
+| `apiKey` | (required) | API key from registration |
+| `agentId` | `openclaw-agent` | Identifier for this agent |
+| `captureFullIo` | `false` | Capture full tool input/output (up to 50KB) |
+| `blockSensitiveAccess` | `false` | Block tool calls to sensitive files |
+| `requireApprovalForHighRisk` | `false` | Require user approval for potential exfiltration |
+| `batchSize` | `10` | Events buffered before sending |
+| `flushIntervalMs` | `5000` | Max time before flushing event buffer |
 
 ## What Gets Detected
 

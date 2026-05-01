@@ -2,7 +2,7 @@ param(
     [string]$OpenClawCommand = "openclaw",
     [string]$ConfigPath = (Join-Path $HOME ".openclaw\openclaw.json"),
     [string]$WorkingDirectory = (Join-Path $PSScriptRoot ".."),
-    [string[]]$InstallArguments = @("plugins", "install", "-l", ".")
+    [string[]]$InstallArguments = @()
 )
 
 Set-StrictMode -Version Latest
@@ -26,6 +26,37 @@ if (-not (Get-Command $OpenClawCommand -ErrorAction SilentlyContinue)) {
 }
 
 $resolvedWorkingDirectory = (Resolve-Path -LiteralPath $WorkingDirectory).Path
+
+if ($InstallArguments.Count -eq 0) {
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Error "npm was not found. Install Node/npm or pass -InstallArguments with an existing plugin archive."
+    }
+
+    Push-Location $resolvedWorkingDirectory
+    try {
+        & npm run build
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+
+        $packOutput = & npm pack --json
+        if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+        }
+
+        $packInfo = $packOutput | ConvertFrom-Json
+        $packageFile = if ($packInfo -is [array]) { $packInfo[0].filename } else { $packInfo.filename }
+        if (-not $packageFile) {
+            Write-Error "npm pack did not report a package filename."
+        }
+
+        $InstallArguments = @("plugins", "install", (Join-Path $resolvedWorkingDirectory $packageFile), "--force")
+    }
+    finally {
+        Pop-Location
+    }
+}
+
 $beforeHash = Get-ConfigHash -Path $ConfigPath
 $beforeDisplay = if ($null -eq $beforeHash) { "<missing>" } else { $beforeHash }
 

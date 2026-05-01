@@ -313,17 +313,17 @@ describe("Security: Session map limits", () => {
   });
 
   it("handles many unique session keys without crashing", async () => {
-    process.env.CLAWGUARD_API_KEY = "test-key";
-    process.env.CLAWGUARD_BACKEND_URL = "http://localhost:8000";
-    process.env.CLAWGUARD_AGENT_ID = "test-bot";
-
     const mod = await import("../../openclaw-plugin/src/index.js");
 
     let transcriptCallback: Function;
     const api = {
       registerHook: vi.fn(),
       on: vi.fn(),
-      pluginConfig: { agentId: "test-bot" },
+      pluginConfig: {
+        apiKey: "test-key",
+        backendUrl: "http://localhost:8000",
+        agentId: "test-bot",
+      },
       runtime: {
         events: {
           onSessionTranscriptUpdate: vi.fn((cb: Function) => {
@@ -358,9 +358,5 @@ describe("Security: Session map limits", () => {
 
     // Should not throw — session cap evicts oldest sessions
     expect(mockFetch).toHaveBeenCalled();
-
-    delete process.env.CLAWGUARD_API_KEY;
-    delete process.env.CLAWGUARD_BACKEND_URL;
-    delete process.env.CLAWGUARD_AGENT_ID;
   });
 });
